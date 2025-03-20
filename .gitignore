@@ -1,0 +1,11 @@
+# Esclude il file con le credenziali
+bot_infos.env
+
+# Esclude la cartella di Pyrogram se esiste
+job_board_bot.session
+
+# Esclude file temporanei e cartelle di sistema
+__pycache__/
+*.pyc
+.DS_Store
+bot_infos.env
