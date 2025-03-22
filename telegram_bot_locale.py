@@ -1,10 +1,13 @@
-# Descrizione: Bot per la pubblicazione di annunci in un gruppo Telegram, con menu interattivo e deep linking.
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import os
 from dotenv import load_dotenv
+import logging
+import asyncio
 
-# Carica le variabili di ambiente dal file .env
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Carica le variabili di ambiente dal file .env (o dal file che usi, ad es. bot_infos.env)
 load_dotenv()
 
 # CONFIGURAZIONE API TELEGRAM tramite .env
@@ -12,7 +15,7 @@ API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME")
-CHAT_ID = int(os.getenv("CHAT_ID"))  # Assicurati che CHAT_ID sia un intero
+CHAT_ID = os.getenv("CHAT_ID")
 
 app = Client("job_board_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
@@ -35,13 +38,37 @@ CATEGORY_TOPIC_NAMES = {
     "project": "Progetti & Teamwork"
 }
 
+# Timeout di inattività in secondi
+# Per ora impostato a 5 minuti (300 secondi); in futuro potrai modificarlo
+INACTIVITY_TIMEOUT = 5 * 60
+
+# Variabile globale per il task di inattività
+inactivity_timer = None
+
+# Funzione che ferma il bot dopo un periodo di inattività
+async def stop_bot_after_timeout():
+    await asyncio.sleep(INACTIVITY_TIMEOUT)
+    print("⏰ Timeout di inattività raggiunto. Spegnimento del bot...")
+    await app.stop()
+
+# Funzione per resettare il timer di inattività (chiamata ad ogni input)
+def reset_inactivity_timer():
+    global inactivity_timer
+    if inactivity_timer is not None:
+        inactivity_timer.cancel()
+    inactivity_timer = asyncio.create_task(stop_bot_after_timeout())
+
+# Inizializza il timer all'avvio
+reset_inactivity_timer()
 
 # -------------------------------------
 # Handler per il comando /start in chat privata.
-# Questo gestisce sia il menu principale che le interazioni via deep linking.
+# Gestisce sia il menu principale che le interazioni via deep linking.
 # -------------------------------------
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
+    reset_inactivity_timer()  # Reset del timer per ogni input
+
     # Se il comando /start ha un parametro (deep linking)
     if len(message.command) > 1:
         param = message.command[1]
@@ -64,6 +91,7 @@ async def start(client, message):
             # Handler temporaneo per la query di ricerca, specifico per l'utente.
             @app.on_message(filters.text & filters.private)
             async def get_search_query(client, m):
+                reset_inactivity_timer()  # Reset del timer per ogni input
                 if m.from_user.id != message.from_user.id:
                     return
                 keyword = m.text.lower()
@@ -96,10 +124,11 @@ async def start(client, message):
 
 # -------------------------------------
 # Handler per la raccolta dati per la pubblicazione.
-# Il processo si attiva solo se l'utente ha già avviato il flusso con /start new_<categoria>.
+# Si attiva se l'utente ha già avviato il flusso con /start new_<categoria>.
 # -------------------------------------
 @app.on_message(filters.private)
 async def collect_data(client, message):
+    reset_inactivity_timer()  # Reset del timer per ogni messaggio
     user_id = message.from_user.id
     if user_id not in user_data:
         return  # Ignora i messaggi che non fanno parte del flusso di pubblicazione
@@ -131,6 +160,7 @@ async def collect_data(client, message):
 # Utilizza il CHAT_ID del gruppo e il topic_id specifico per la categoria.
 # -------------------------------------
 async def publish_announcement(client, user_id):
+    reset_inactivity_timer()  # Reset del timer per sicurezza
     category = user_data[user_id]["category"]
     topic_id = CATEGORY_TOPIC_IDS.get(category)
     if not topic_id:
