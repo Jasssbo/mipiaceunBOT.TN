@@ -53,7 +53,7 @@ print("Dizionari CATEGORY_TOPIC_IDS e CATEGORY_TOPIC_NAMES creati correttamente.
 # -------------------------------------
 # HANDLER /start (menu principale e deep linking)
 # -------------------------------------
-@app.on_message(filters.command("start") & filters.private)
+@app.on_message(filters.command("start") & (filters.private | filters.group))
 async def start_handler(client, message):
     try:
         print(f"Ricevuto comando /start da {message.from_user.id}.")
