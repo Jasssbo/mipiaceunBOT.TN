@@ -27,7 +27,6 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME")
 CHAT_ID = int(os.getenv("CHAT_ID"))
 
-
 if not all([API_ID, API_HASH, BOT_TOKEN, BOT_USERNAME, CHAT_ID]):
     logging.error("Errore: alcune variabili di ambiente non sono state caricate correttamente.")
     exit(1)
@@ -56,6 +55,7 @@ CATEGORY_QUESTIONS = {
     "event": [
         "📅 Nome dell'evento:",
         "📜 Descrizione dell'evento:",
+        "Volantino / Flyer (opzionale):",
         "📍 Luogo:",
         "📆 Data e ora:",
         "📞 Contatti (email o Telegram):"
@@ -64,7 +64,7 @@ CATEGORY_QUESTIONS = {
         "🚀 Titolo del progetto:",
         "📜 Descrizione del progetto:",
         "🔗 Link (opzionale):",
-        "📎 Puoi caricare file:",
+        "📎 Puoi caricare un file (opzionale):",
         "📞 Contatti (email o Telegram):"
     ]
 }
@@ -125,10 +125,12 @@ async def collect_data_handler(client, message: Message):
             file_id = message.photo.file_id
             user_info["answers"][CATEGORY_QUESTIONS[category][step]] = "🖼 Immagine allegata."
             user_info["file"] = file_id
+            user_info["file_type"] = "photo"
         elif message.document:
             file_id = message.document.file_id
             user_info["answers"][CATEGORY_QUESTIONS[category][step]] = "📎 Documento allegato."
             user_info["file"] = file_id
+            user_info["file_type"] = "document"
         elif message.text and message.text.strip():
             user_info["answers"][CATEGORY_QUESTIONS[category][step]] = message.text
         else:
@@ -158,7 +160,10 @@ async def send_preview(client, user_id):
         ])
 
         if "file" in user_info:
-            await client.send_photo(user_id, user_info["file"], caption=message_text, reply_markup=buttons)
+            if user_info.get("file_type") == "photo":
+                await client.send_photo(user_id, user_info["file"], caption=message_text, reply_markup=buttons)
+            else:
+                await client.send_document(user_id, user_info["file"], caption=message_text, reply_markup=buttons)
         else:
             await client.send_message(user_id, text=f"📌 **Anteprima Annuncio:**\n\n{message_text}", reply_markup=buttons)
     except Exception as e:
@@ -192,9 +197,14 @@ async def publish_announcement(client, user_id):
         message_text = "\n".join([f"🔹 **{key}** {value}" for key, value in user_data[user_id]["answers"].items()])
 
         if "file" in user_data[user_id]:
-            await client.send_photo(CHAT_ID, user_data[user_id]["file"],
-                                    caption=message_text,
-                                    reply_to_message_id=pointer_message_id)
+            if user_data[user_id].get("file_type") == "photo":
+                await client.send_photo(CHAT_ID, user_data[user_id]["file"],
+                                        caption=message_text,
+                                        reply_to_message_id=pointer_message_id)
+            else:
+                await client.send_document(CHAT_ID, user_data[user_id]["file"],
+                                           caption=message_text,
+                                           reply_to_message_id=pointer_message_id)
         else:
             await client.send_message(CHAT_ID,
                                       text=message_text,
