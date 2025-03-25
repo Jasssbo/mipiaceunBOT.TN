@@ -47,9 +47,9 @@ CATEGORY_QUESTIONS = {
         "📞 Contatti (email o Telegram):"
     ],
     "collab": [
-        "🔖 Titolo della collaborazione:",
-        "📜 Tipo di collaborazione:",
-        "💰 Budget (opzionale):",
+        "🔖 Chi si propone?",
+        "📜 C.V.:",
+        "💼 LinkedIn (opzionale):",
         "📞 Contatti (email o Telegram):"
     ],
     "event": [
@@ -58,6 +58,7 @@ CATEGORY_QUESTIONS = {
         "Volantino / Flyer (opzionale):",
         "📍 Luogo:",
         "📆 Data e ora:",
+        "💰 Entrata:",
         "📞 Contatti (email o Telegram):"
     ],
     "project": [
@@ -119,20 +120,27 @@ async def collect_data_handler(client, message: Message):
         user_info = user_data[user_id]
         category = user_info["category"]
         step = user_info["step"]
+        current_question = CATEGORY_QUESTIONS[category][step]
 
-        # Gestione di file (immagini o documenti) e testo
+        # Gestione dei file (immagini o documenti)
         if message.photo:
             file_id = message.photo.file_id
-            user_info["answers"][CATEGORY_QUESTIONS[category][step]] = "🖼 Immagine allegata."
+            user_info["answers"][current_question] = "🖼 Immagine allegata."
             user_info["file"] = file_id
             user_info["file_type"] = "photo"
         elif message.document:
             file_id = message.document.file_id
-            user_info["answers"][CATEGORY_QUESTIONS[category][step]] = "📎 Documento allegato."
+            user_info["answers"][current_question] = "📎 Documento allegato."
             user_info["file"] = file_id
             user_info["file_type"] = "document"
+        # Gestione del testo
         elif message.text and message.text.strip():
-            user_info["answers"][CATEGORY_QUESTIONS[category][step]] = message.text
+            # Se il campo è opzionale e l'utente invia "/skip", saltiamo il campo
+            if "(opzionale)" in current_question and message.text.strip().lower() == "/skip":
+                # Non aggiungiamo il campo alle risposte
+                pass
+            else:
+                user_info["answers"][current_question] = message.text.strip()
         else:
             await message.reply_text("⚠️ Il messaggio non può essere vuoto. Riprova.")
             return
@@ -153,6 +161,7 @@ async def collect_data_handler(client, message: Message):
 async def send_preview(client, user_id):
     try:
         user_info = user_data[user_id]
+        # Creiamo il messaggio solo con i campi compilati
         message_text = "\n".join([f"🔹 **{key}** {value}" for key, value in user_info["answers"].items()])
         buttons = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Conferma", callback_data=f"confirm_{user_id}")],
