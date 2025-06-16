@@ -1,26 +1,14 @@
-from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 import os
 import sys
 import logging
 from dotenv import load_dotenv
+from pyrogram import Client, filters, errors
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-# Configura il logging (sia su file che in console)
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-       #logging.FileHandler("bot.log", encoding="utf-8"),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logging.getLogger().setLevel(logging.DEBUG)
+# ------------------------ CONFIGURAZIONE ------------------------
 
-# ------------------------------
-# CONFIGURAZIONE DEL BOT
-# ------------------------------
 load_dotenv("bot_infos.env")
-
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -28,203 +16,264 @@ BOT_USERNAME = os.getenv("BOT_USERNAME")
 CHAT_ID = int(os.getenv("CHAT_ID"))
 
 if not all([API_ID, API_HASH, BOT_TOKEN, BOT_USERNAME, CHAT_ID]):
-    logging.error("Errore: alcune variabili di ambiente non sono state caricate correttamente.")
-    exit(1)
+    missing = [var for var in ["API_ID", "API_HASH", "BOT_TOKEN", "BOT_USERNAME", "CHAT_ID"] if not locals()[var]]
+    logging.critical(f"Missing required .env variables: {', '.join(missing)}")
+    sys.exit(1)
 
-# I messaggi pointer (da creare manualmente su Telegram) – NON FISSATI, sono solo riferimenti
-POINTER_MESSAGE_IDS = {
-    "job": 466,       # Inserisci il vero message_id per "job"
-    "collab": 468,    # Inserisci il vero message_id per "collab"
-    "event": 463,     # Inserisci il vero message_id per "event"
-    "project": 467    # Inserisci il vero message_id per "project"
-}
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+
+bot = Client("job_board_bot", api_id=int(API_ID), api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 CATEGORY_QUESTIONS = {
     "job": [
-        "📝 Titolo richiesto:",
-        "📜 Descrizione del lavoro:",
-        "📍 Luogo:",
-        "📞 Contatti (email o Telegram):"
-    ],
-    "collab": [
-        "🔖 Chi si propone?",
-        "📜 C.V.:",
-        "💼 LinkedIn (opzionale):",
-        "📞 Contatti (email o Telegram):"
-    ],
-    "event": [
-        "📅 Nome dell'evento:",
-        "📜 Descrizione dell'evento:",
-        "Volantino / Flyer (opzionale):",
-        "📍 Luogo:",
-        "📆 Data e ora:",
-        "💰 Entrata:",
-        "📞 Contatti (email o Telegram):"
+        {"question": "💼 Inserisci il TITOLO LAVORATIVO che cerchi (es. Fonico):", "label": "💼 Titolo lavorativo richiesto:"},
+        {"question": "📜 DESCRIVI LA MANSIONE e ciò di cui si dovrà occupare:", "label": "📜 Descrizione mansione:"},
+        {"question": "📍 Inserisci il LUOGO in cui richiedi questa figura:", "label": "📍 Luogo del Lavoro:"},
+        {"question": "📞 Inserisci i tuoi CONTATTI (email o Telegram):", "label": "📞 Contatti:"}
     ],
     "project": [
-        "🚀 Titolo del progetto:",
-        "📜 Descrizione del progetto:",
-        "🔗 Link (opzionale):",
-        "📎 Puoi caricare un file (opzionale):",
-        "📞 Contatti (email o Telegram):"
+        {"question": "🚀 Inserisci il TITOLO DEL PROGETTO:", "label": "🚀 Titolo del Progetto:"},
+        {"question": "📜 DESCRIVI IL TUO PROGETTO e spiega a quali ambiti è riferito:", "label": "📜 Descrizione del Progetto:"},
+        {"question": "🔗 Inserisci un LINK (opzionale):", "label": "🔗 Link:"},
+        {"question": "📌 Puoi CARICARE UN FILE (opzionale):", "label": "📌 File allegato:"},
+        {"question": "📞 CONTATTI (email o Telegram):", "label": "📞 Contatti:"}
+    ],
+    "event": [
+        {"question": "🎫 Inserisci il NOME DELL'EVENTO:", "label": "🎫 Nome evento:"},
+        {"question": "📰 Inserisci il VOLANTINO / FLYER dell'EVENTO:", "label": "📰 Flyer:"},
+        {"question": "📍 Inserisci il LUOGO:", "label": "📍 Luogo:"},
+        {"question": "⏰ Inserisci la DATA E ORA:", "label": "⏰ Data e ora:"},
+        {"question": "💰 Inserisci il COSTO del BIGLIETTO:", "label": "💰 Costo biglietto:"},
+        {"question": "📞 Inserisci i CONTATTI (email o Telegram):", "label": "📞 Contatti:"}
+    ],
+    "profile": [
+        {"question": "👤 Inserisci il tuo NOME E COGNOME:", "label": "👤 Nome e cognome:"},
+        {"question": "💼 Inserisci la tua PROFESSIONE:", "label": "💼 Professione:"},
+        {"question": "📜 Breve descrizione delle competenze (opzionale):", "label": "📜 Competenze:"},
+        {"question": "📝 Puoi CARICARE il TUO CURRICULUM (opzionale):", "label": "📝 Curriculum:"},
+        {"question": "🔗 LINK a PROFILO LinkedIn (opzionale):", "label": "🔗 Profilo LinkedIn:"},
+        {"question": "📞 Inserisci i tuoi CONTATTI (telefono, email, Telegram):", "label": "📞 Contatti:"}
     ]
 }
 
-# Dizionario globale per memorizzare temporaneamente i dati degli utenti
+POINTER_MESSAGE_IDS = {
+    "job": 466,
+    "project": 467,
+    "event": 463,
+    "profile": 468
+}
+
 user_data = {}
 
-# ------------------------------
-# INIZIALIZZAZIONE DEL BOT
-# ------------------------------
-bot = Client("job_board_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+# ------------------------ UTILITY ------------------------
 
-# ------------------------------
-# HANDLER /start
-# ------------------------------
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=4, max=60),
+       retry=retry_if_exception_type((errors.FloodWait, errors.RPCError)))
+async def safe_delete(client, chat_id, message_id):
+    try:
+        await client.delete_messages(chat_id, message_id)
+    except errors.MessageDeleteForbidden:
+        pass
+
+async def send_clean_message(client, user_id, chat_id, text, reply_markup=None):
+    last_msg_id = user_data.get(user_id, {}).get("last_bot_message_id")
+    if last_msg_id:
+        await safe_delete(client, chat_id, last_msg_id)
+
+    sent = await client.send_message(chat_id, text, reply_markup=reply_markup)
+
+    if user_id not in user_data:
+        user_data[user_id] = {"last_bot_message_id": None, "messages_to_delete": []}
+
+    user_data[user_id]["last_bot_message_id"] = sent.id
+    user_data[user_id]["messages_to_delete"].append(sent.id)
+
+# ------------------------ /start ------------------------
+
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message: Message):
+    user_id = message.from_user.id
+    user_data[user_id] = {
+        "step": 0,
+        "answers": {},
+        "messages_to_delete": [],
+        "last_bot_message_id": None
+    }
+
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📆 Evento", callback_data="new_event")],
+        [InlineKeyboardButton("📢 Annuncio di Lavoro", callback_data="new_job")],
+        [InlineKeyboardButton("🚀 Call Pubblica per un Progetto", callback_data="new_project")],
+        [InlineKeyboardButton("👤 Il Tuo Profilo Lavorativo", callback_data="new_profile")]
+    ])
+
+    await send_clean_message(client, user_id, message.chat.id, "Benvenuto! Cosa vuoi pubblicare all'interno della Community?", buttons)
+
+# ------------------------ CALLBACK HANDLER ------------------------
+
+@bot.on_callback_query()
+async def callback_handler(client, callback_query: CallbackQuery):
+    await callback_query.answer()
+    data = callback_query.data
+    user_id = callback_query.from_user.id
+    chat_id = callback_query.message.chat.id
+
     try:
-        if len(message.command) > 1:
-            param = message.command[1]
-            if param.startswith("new_"):
-                category = param.replace("new_", "")
-                if category not in POINTER_MESSAGE_IDS:
-                    await message.reply_text("⚠️ Errore: categoria non valida.")
-                    return
-                # Avvia il flusso per la categoria scelta
-                user_data[message.from_user.id] = {"category": category, "step": 0, "answers": {}}
-                await message.reply_text(CATEGORY_QUESTIONS[category][0])
-                return
+        if data.startswith("new_"):
+            cat = data.replace("new_", "")
+            user_data[user_id].update({"category": cat, "step": 0, "answers": {}, "messages_to_delete": []})
 
-        # Se non viene passato nessun parametro, mostra un menu principale
-        buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📢 Pubblica Annuncio", url=f"https://t.me/{BOT_USERNAME}?start=new_job")],
-            [InlineKeyboardButton("🤝 Offri Collaborazione", url=f"https://t.me/{BOT_USERNAME}?start=new_collab")],
-            [InlineKeyboardButton("📆 Organizza Evento", url=f"https://t.me/{BOT_USERNAME}?start=new_event")],
-            [InlineKeyboardButton("🚀 Proponi Progetto", url=f"https://t.me/{BOT_USERNAME}?start=new_project")]
-        ])
-        await message.reply_text("👋 **Benvenuto!**\nScegli cosa vuoi fare:", reply_markup=buttons)
-    except Exception as e:
-        logging.error(f"Errore nel comando /start: {str(e)}")
+            await send_clean_message(
+                client,
+                user_id,
+                chat_id,
+                CATEGORY_QUESTIONS[cat][0]["question"],
+                InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
+                ])
+            )
 
-# ------------------------------
-# HANDLER PER LA RACCOLTA DEI DATI DELL'ANNUNCIO
-# ------------------------------
-@bot.on_message(filters.private)
-async def collect_data_handler(client, message: Message):
-    try:
-        user_id = message.from_user.id
-        if user_id not in user_data:
-            return
-
-        user_info = user_data[user_id]
-        category = user_info["category"]
-        step = user_info["step"]
-        current_question = CATEGORY_QUESTIONS[category][step]
-
-        # Gestione dei file (immagini o documenti)
-        if message.photo:
-            file_id = message.photo.file_id
-            user_info["answers"][current_question] = "🖼 Immagine allegata."
-            user_info["file"] = file_id
-            user_info["file_type"] = "photo"
-        elif message.document:
-            file_id = message.document.file_id
-            user_info["answers"][current_question] = "📎 Documento allegato."
-            user_info["file"] = file_id
-            user_info["file_type"] = "document"
-        # Gestione del testo
-        elif message.text and message.text.strip():
-            # Se il campo è opzionale e l'utente invia "/skip", saltiamo il campo
-            if "(opzionale)" in current_question and message.text.strip().lower() == "/skip":
-                # Non aggiungiamo il campo alle risposte
-                pass
-            else:
-                user_info["answers"][current_question] = message.text.strip()
-        else:
-            await message.reply_text("⚠️ Il messaggio non può essere vuoto. Riprova.")
-            return
-
-        step += 1
-        if step < len(CATEGORY_QUESTIONS[category]):
-            user_info["step"] = step
-            await message.reply_text(CATEGORY_QUESTIONS[category][step])
-        else:
-            await send_preview(client, user_id)
-    except Exception as e:
-        logging.error(f"Errore nella raccolta dei dati: {str(e)}")
-        await message.reply_text("❌ Si è verificato un errore, riprova più tardi.")
-
-# ------------------------------
-# INVIO DELL'ANTEPRIMA DELL'ANNUNCIO
-# ------------------------------
-async def send_preview(client, user_id):
-    try:
-        user_info = user_data[user_id]
-        # Creiamo il messaggio solo con i campi compilati
-        message_text = "\n".join([f"🔹 **{key}** {value}" for key, value in user_info["answers"].items()])
-        buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Conferma", callback_data=f"confirm_{user_id}")],
-            [InlineKeyboardButton("❌ Annulla", callback_data=f"cancel_{user_id}")]
-        ])
-
-        if "file" in user_info:
-            if user_info.get("file_type") == "photo":
-                await client.send_photo(user_id, user_info["file"], caption=message_text, reply_markup=buttons)
-            else:
-                await client.send_document(user_id, user_info["file"], caption=message_text, reply_markup=buttons)
-        else:
-            await client.send_message(user_id, text=f"📌 **Anteprima Annuncio:**\n\n{message_text}", reply_markup=buttons)
-    except Exception as e:
-        logging.error(f"Errore in send_preview: {str(e)}")
-
-# ------------------------------
-# HANDLER PER I CALLBACK (CONFERMA/ANNULLA)
-# ------------------------------
-@bot.on_callback_query(filters.regex("^(confirm|cancel)_"))
-async def confirmation_handler(client, callback_query: CallbackQuery):
-    try:
-        data = callback_query.data
-        user_id = int(data.split("_")[1])
-        if data.startswith("confirm_"):
-            await publish_announcement(client, user_id)
-            await callback_query.message.edit_text("✅ Annuncio pubblicato con successo!")
-        elif data.startswith("cancel_"):
+        elif data == "back_to_menu":
             if user_id in user_data:
-                del user_data[user_id]
-            await callback_query.message.edit_text("❌ Annuncio annullato. Puoi crearne un altro con /start.")
-    except Exception as e:
-        logging.error(f"Errore in confirmation_handler: {str(e)}")
+                for mid in user_data[user_id].get("messages_to_delete", []):
+                    await safe_delete(client, chat_id, mid)
+                user_data.pop(user_id, None)
 
-# ------------------------------
-# PUBBLICAZIONE DELL'ANNUNCIO
-# ------------------------------
-async def publish_announcement(client, user_id):
-    try:
-        category = user_data[user_id]["category"]
-        pointer_message_id = POINTER_MESSAGE_IDS.get(category)
-        message_text = "\n".join([f"🔹 **{key}** {value}" for key, value in user_data[user_id]["answers"].items()])
+            buttons = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📆 Evento", callback_data="new_event")],
+                [InlineKeyboardButton("📢 Lavoro", callback_data="new_job")],
+                [InlineKeyboardButton("🚀 Progetto", callback_data="new_project")],
+                [InlineKeyboardButton("👤 Profilo", callback_data="new_profile")]
+            ])
+            await send_clean_message(client, user_id, chat_id, "🏠 Sei tornato al menù principale. Cosa vuoi aggiungere?", buttons)
 
-        if "file" in user_data[user_id]:
-            if user_data[user_id].get("file_type") == "photo":
-                await client.send_photo(CHAT_ID, user_data[user_id]["file"],
-                                        caption=message_text,
-                                        reply_to_message_id=pointer_message_id)
+        elif data.startswith("confirm_") or data.startswith("cancel_"):
+            uid = int(data.split("_")[1])
+            if data.startswith("confirm_"):
+                await publish_announcement(client, uid)
+                text = "✅ Pubblicato!"
             else:
-                await client.send_document(CHAT_ID, user_data[user_id]["file"],
-                                           caption=message_text,
-                                           reply_to_message_id=pointer_message_id)
-        else:
-            await client.send_message(CHAT_ID,
-                                      text=message_text,
-                                      reply_to_message_id=pointer_message_id)
+                text = "❌ Inserimento annullato."
 
-        del user_data[user_id]
+            for mid in user_data.get(uid, {}).get("messages_to_delete", []):
+                await safe_delete(client, chat_id, mid)
+            user_data[uid]["messages_to_delete"].clear()
+            await send_clean_message(client, user_id, chat_id, text)
+            user_data.pop(uid, None)
+
+        elif data == "back_to_question":
+            info = user_data[user_id]
+            if info["step"] > 0:
+                info["step"] -= 1
+                if info["answers"]:
+                    info["answers"].popitem()
+                for mid in info["messages_to_delete"]:
+                    await safe_delete(client, chat_id, mid)
+                info["messages_to_delete"].clear()
+
+                q = CATEGORY_QUESTIONS[info["category"]][info["step"]]["question"]
+                await send_clean_message(
+                    client,
+                    user_id,
+                    chat_id,
+                    q,
+                    InlineKeyboardMarkup([
+                        [InlineKeyboardButton("⬅️ Torna alla domanda precedente", callback_data="back_to_question")],
+                        [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
+                    ])
+                )
+
     except Exception as e:
-        logging.error(f"Errore in publish_announcement: {str(e)}")
+        logging.exception("Errore nel callback handler")
+        await send_clean_message(client, user_id, chat_id, f"❌ Errore: {str(e)}")
 
-# ------------------------------
-# AVVIO DEL BOT
-# ------------------------------
+# ------------------------ RACCOLTA DATI ------------------------
+
+@bot.on_message(filters.private & ~filters.command("start"))
+async def collect_data_handler(client, message: Message):
+    user_id = message.from_user.id
+    if user_id not in user_data:
+        return
+
+    try:
+        await safe_delete(client, message.chat.id, message.id)
+
+        info = user_data[user_id]
+        cat = info["category"]
+        step = info["step"]
+        question_data = CATEGORY_QUESTIONS[cat][step]
+        question_text = question_data["question"]
+        label_text = question_data["label"]
+
+        if message.photo or message.document:
+            info["answers"][label_text] = "📎 File allegato."
+            info["file"] = message.photo.file_id if message.photo else message.document.file_id
+            info["file_type"] = "photo" if message.photo else "document"
+        elif message.text:
+            if "(opzionale)" in question_text.lower() and message.text.lower().strip() == "/skip":
+                info["answers"][label_text] = "Saltato."
+            else:
+                info["answers"][label_text] = message.text.strip()
+
+        info["step"] += 1
+        if info["step"] < len(CATEGORY_QUESTIONS[cat]):
+            next_q = CATEGORY_QUESTIONS[cat][info["step"]]["question"]
+            buttons = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Torna alla domanda precedente", callback_data="back_to_question")],
+                [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
+            ])
+            await send_clean_message(client, user_id, message.chat.id, next_q, buttons)
+        else:
+            announcement_text = f"📢 **Anteprima del tuo {cat.capitalize()}**\n\n"
+            for label, a in info["answers"].items():
+                announcement_text += f"**{label}**\n{a}\n\n"
+
+            preview_message = await client.send_message(message.chat.id, announcement_text)
+
+            confirm_btns = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Conferma", callback_data=f"confirm_{user_id}")],
+                [InlineKeyboardButton("❌ Annulla", callback_data=f"cancel_{user_id}")],
+                [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
+            ])
+            await send_clean_message(client, user_id, message.chat.id, "✅ Confermi di voler pubblicare questo annuncio?", confirm_btns)
+
+    except Exception as e:
+        logging.exception("Errore nella raccolta dati")
+
+# ------------------------ PUBBLICAZIONE ------------------------
+
+async def publish_announcement(client, user_id):
+    info = user_data.get(user_id)
+    if not info:
+        return
+
+    cat = info["category"]
+    text = f"📢 **Nuovo {cat.capitalize()}**\n\n"
+    for label, a in info["answers"].items():
+        text += f"**{label}**\n{a}\n\n"
+
+    pointer_id = POINTER_MESSAGE_IDS.get(cat)
+    file_id = info.get("file")
+
+    if pointer_id:
+        try:
+            if file_id:
+                if info.get("file_type") == "photo":
+                    await client.send_photo(CHAT_ID, file_id, caption=text, reply_to_message_id=pointer_id)
+                else:
+                    await client.send_document(CHAT_ID, file_id, caption=text, reply_to_message_id=pointer_id)
+            else:
+                await client.send_message(CHAT_ID, text, reply_to_message_id=pointer_id)
+        except Exception as e:
+            logging.exception(f"Errore durante la pubblicazione: {e}")
+
+# ------------------------ AVVIO ------------------------
+
 if __name__ == "__main__":
+    logging.info("🤖 Avvio bot...")
     bot.run()
+    logging.info("🔚 Arresto bot...")
