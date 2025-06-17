@@ -36,7 +36,7 @@ CATEGORY_QUESTIONS = {
         {"question": "📞 Inserisci i tuoi CONTATTI (email o Telegram):", "label": "📞 Contatti:"}
     ],
     "project": [
-        {"question": "🚀 Inserisci il TITOLO DEL PROGETTO:", "label": "🚀 Titolo del Progetto:"},
+        {"question": "💡 Inserisci il TITOLO DEL PROGETTO:", "label": "💡 Titolo del Progetto:"},
         {"question": "📜 DESCRIVI IL TUO PROGETTO e spiega a quali ambiti è riferito:", "label": "📜 Descrizione del Progetto:"},
         {"question": "🔗 Inserisci un LINK (opzionale):", "label": "🔗 Link:"},
         {"question": "📌 Puoi CARICARE UN FILE (opzionale):", "label": "📌 File allegato:"},
@@ -53,7 +53,7 @@ CATEGORY_QUESTIONS = {
     "profile": [
         {"question": "👤 Inserisci il tuo NOME E COGNOME:", "label": "👤 Nome e cognome:"},
         {"question": "💼 Inserisci la tua PROFESSIONE:", "label": "💼 Professione:"},
-        {"question": "📜 Breve descrizione delle competenze (opzionale):", "label": "📜 Competenze:"},
+        {"question": "📜 Breve descrizione delle competenze (max. 5 righe):", "label": "📜 Competenze:"},
         {"question": "📝 Puoi CARICARE il TUO CURRICULUM (opzionale):", "label": "📝 Curriculum:"},
         {"question": "🔗 LINK a PROFILO LinkedIn (opzionale):", "label": "🔗 Profilo LinkedIn:"},
         {"question": "📞 Inserisci i tuoi CONTATTI (telefono, email, Telegram):", "label": "📞 Contatti:"}
@@ -106,8 +106,8 @@ async def start_handler(client, message: Message):
 
     buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("📆 Evento", callback_data="new_event")],
-        [InlineKeyboardButton("📢 Annuncio di Lavoro", callback_data="new_job")],
-        [InlineKeyboardButton("🚀 Call Pubblica per un Progetto", callback_data="new_project")],
+        [InlineKeyboardButton("💼 Annuncio di Lavoro", callback_data="new_job")],
+        [InlineKeyboardButton("💡 Call Pubblica per un Progetto", callback_data="new_project")],
         [InlineKeyboardButton("👤 Il Tuo Profilo Lavorativo", callback_data="new_profile")]
     ])
 
@@ -145,11 +145,11 @@ async def callback_handler(client, callback_query: CallbackQuery):
 
             buttons = InlineKeyboardMarkup([
                 [InlineKeyboardButton("📆 Evento", callback_data="new_event")],
-                [InlineKeyboardButton("📢 Lavoro", callback_data="new_job")],
-                [InlineKeyboardButton("🚀 Progetto", callback_data="new_project")],
-                [InlineKeyboardButton("👤 Profilo", callback_data="new_profile")]
+                [InlineKeyboardButton("💼 Annuncio di Lavoro", callback_data="new_job")],
+                [InlineKeyboardButton("💡 Call Pubblica per un Progetto", callback_data="new_project")],
+                [InlineKeyboardButton("👤 Il Tuo Profilo Lavorativo", callback_data="new_profile")]
             ])
-            await send_clean_message(client, user_id, chat_id, "🏠 Sei tornato al menù principale. Cosa vuoi aggiungere?", buttons)
+            await send_clean_message(client, user_id, chat_id, "🏠 Sei tornato al menù principale. Cosa vuoi pubblicare nella Community?", buttons)
 
         elif data.startswith("confirm_") or data.startswith("cancel_"):
             uid = int(data.split("_")[1])
