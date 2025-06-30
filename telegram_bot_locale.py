@@ -28,38 +28,42 @@ logging.basicConfig(
 
 bot = Client("job_board_bot", api_id=int(API_ID), api_hash=API_HASH, bot_token=BOT_TOKEN)
 
+# ------------------------ DOMANDE PER CATEGORIA ------------------------
+
 CATEGORY_QUESTIONS = {
     "job": [
-        {"question": "💼 Inserisci il TITOLO LAVORATIVO che cerchi (es. Fonico):", "label": "💼 Titolo lavorativo richiesto:"},
-        {"question": "📜 DESCRIVI LA MANSIONE e ciò di cui si dovrà occupare:", "label": "📜 Descrizione mansione:"},
-        {"question": "📍 Inserisci il LUOGO in cui richiedi questa figura:", "label": "📍 Luogo del Lavoro:"},
-        {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:"}
+        {"question": "💼 Inserisci il TITOLO LAVORATIVO che cerchi (es. Fonico):", "label": "💼 Titolo lavorativo richiesto:", "skippable": False},
+        {"question": "📜 DESCRIVI LA MANSIONE e ciò di cui si dovrà occupare:", "label": "📜 Descrizione mansione:", "skippable": False},
+        {"question": "📍 Inserisci il LUOGO in cui richiedi questa figura:", "label": "📍 Luogo del Lavoro:", "skippable": False},
+        {"question": "💰 Inserisci il COMPENSO:", "label": "💰 Compenso:", "skippable": True},
+        {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
     ],
     "project": [
-        {"question": "💡 Inserisci il TITOLO DEL PROGETTO:", "label": "💡 Titolo del Progetto:"},
-        {"question": "📜 DESCRIVI IL TUO PROGETTO e spiega a quali ambiti è riferito:", "label": "📜 Descrizione del Progetto:"},
-        {"question": "🔗 Inserisci un LINK (opzionale):", "label": "🔗 Link:"},
-        {"question": "📌 Puoi CARICARE UN FILE (opzionale):", "label": "📌 File allegato:"},
-        {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:"}
+        {"question": "💡 Inserisci il TITOLO DEL PROGETTO:", "label": "💡 Titolo del Progetto:", "skippable": False},
+        {"question": "📜 DESCRIVI IL TUO PROGETTO e spiega a quali ambiti è riferito:", "label": "📜 Descrizione del Progetto:", "skippable": False},
+        {"question": "🔗 Inserisci un LINK (opzionale):", "label": "🔗 Link:", "skippable": True},
+        {"question": "📌 Puoi CARICARE UN FILE (opzionale):", "label": "📌 File allegato:", "skippable": True},
+        {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
     ],
     "event": [
-        {"question": "🎫 Inserisci il NOME DELL'EVENTO:", "label": "🎫 Nome evento:"},
-        {"question": "📰 Inserisci il VOLANTINO / FLYER dell'EVENTO:", "label": "📰 Flyer:"},
-        {"question": "📍 Inserisci il LUOGO:", "label": "📍 Luogo:"},
-        {"question": "⏰ Inserisci la DATA E ORA:", "label": "⏰ Data e ora:"},
-        {"question": "💰 Inserisci il COSTO del BIGLIETTO:", "label": "💰 Costo biglietto:"},
-        {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:"}
+        {"question": "🎫 Inserisci il NOME DELL'EVENTO:", "label": "🎫 Nome evento:", "skippable": False},
+        {"question": "📰 Inserisci il VOLANTINO / FLYER dell'EVENTO:", "label": "📰 Flyer:","skippable": True},
+        {"question": "📍 Inserisci il LUOGO:", "label": "📍 Luogo:", "skippable": False},
+        {"question": "⏰ Inserisci la DATA E ORA:", "label": "⏰ Data e ora:", "skippable": False},
+        {"question": "💰 Inserisci il COSTO del BIGLIETTO:", "label": "💰 Costo biglietto:", "skippable": True},
+        {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
     ],
     "profile": [
-        {"question": "👤 Inserisci il tuo NOME E COGNOME:", "label": "👤 Nome e cognome:"},
-        {"question": "💼 Inserisci la tua PROFESSIONE:", "label": "💼 Professione:"},
-        {"question": "📜 Breve descrizione delle competenze (max. 5 righe):", "label": "📜 Competenze:"},
-        {"question": "📎 Puoi allegare il file del TUO CURRICULUM (word o pdf):", "label": "📝 Curriculum:"},
-        {"question": "🔗 LINK al tuo Profilo LinkedIn:", "label": "🔗 Profilo LinkedIn:"},
-        {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:"}
+        {"question": "👤 Inserisci il tuo NOME E COGNOME:", "label": "👤 Nome e cognome:", "skippable": False},
+        {"question": "💼 Inserisci la tua PROFESSIONE:", "label": "💼 Professione:", "skippable": False},
+        {"question": "📜 Breve descrizione delle competenze (max. 5 righe):", "label": "📜 Competenze:", "skippable": False},
+        {"question": "📎 Puoi allegare il file del TUO CURRICULUM (word o pdf):", "label": "📝 Curriculum:", "skippable": True},
+        {"question": "🔗 LINK al tuo Profilo LinkedIn:", "label": "🔗 Profilo LinkedIn:", "skippable": True},
+        {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
     ]
 }
 
+# Messaggi di "puntatore" per rispondere nei topic (Pyrogram non permette di scrivere direttamente nei topic, quindi si risponde a un messaggio fisso)
 POINTER_MESSAGE_IDS = {
     "job": 466,
     "project": 467,
@@ -74,12 +78,17 @@ user_data = {}
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=4, max=60),
        retry=retry_if_exception_type((errors.FloodWait, errors.RPCError)))
 async def safe_delete(client, chat_id, message_id):
+    """Elimina un messaggio, ignorando errori di permesso."""
     try:
         await client.delete_messages(chat_id, message_id)
     except errors.MessageDeleteForbidden:
         pass
 
 async def send_clean_message(client, user_id, chat_id, text, reply_markup=None):
+    """
+    Invia un messaggio e cancella il precedente inviato dal bot all'utente.
+    Serve a mantenere la chat privata ordinata e senza messaggi inutili.
+    """
     last_msg_id = user_data.get(user_id, {}).get("last_bot_message_id")
     if last_msg_id:
         await safe_delete(client, chat_id, last_msg_id)
@@ -92,10 +101,13 @@ async def send_clean_message(client, user_id, chat_id, text, reply_markup=None):
     user_data[user_id]["last_bot_message_id"] = sent.id
     user_data[user_id]["messages_to_delete"].append(sent.id)
 
-# ------------------------ /start ------------------------
+# ------------------------ HANDLER /start ------------------------
 
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message: Message):
+    """
+    Handler per il comando /start: resetta i dati utente e mostra il menù principale.
+    """
     user_id = message.from_user.id
     user_data[user_id] = {
         "step": 0,
@@ -113,16 +125,20 @@ async def start_handler(client, message: Message):
 
     await send_clean_message(client, user_id, message.chat.id, "Benvenuto! Cosa vuoi pubblicare all'interno della Community?", buttons)
 
-# ------------------------ CALLBACK HANDLER ------------------------
+# ------------------------ HANDLER CALLBACK ------------------------
 
 @bot.on_callback_query()
 async def callback_handler(client, callback_query: CallbackQuery):
+    """
+    Gestisce tutte le interazioni tramite pulsanti inline.
+    """
     await callback_query.answer()
     data = callback_query.data
     user_id = callback_query.from_user.id
     chat_id = callback_query.message.chat.id
 
     try:
+        # Nuova pubblicazione: resetta i dati e mostra la prima domanda
         if data.startswith("new_"):
             cat = data.replace("new_", "")
             user_data[user_id].update({"category": cat, "step": 0, "answers": {}, "messages_to_delete": []})
@@ -137,6 +153,7 @@ async def callback_handler(client, callback_query: CallbackQuery):
                 ])
             )
 
+        # Torna al menù principale e pulisce la chat privata
         elif data == "back_to_menu":
             if user_id in user_data:
                 for mid in user_data[user_id].get("messages_to_delete", []):
@@ -151,20 +168,63 @@ async def callback_handler(client, callback_query: CallbackQuery):
             ])
             await send_clean_message(client, user_id, chat_id, "🏠 Sei tornato al menù principale. Cosa vuoi pubblicare nella Community?", buttons)
 
+        # Conferma o annulla pubblicazione
         elif data.startswith("confirm_") or data.startswith("cancel_"):
             uid = int(data.split("_")[1])
             if data.startswith("confirm_"):
-                await publish_announcement(client, uid)
+                # Pubblica l'annuncio nel gruppo/canale
+                user = await client.get_users(uid)
+                username = f"@{user.username}" if user.username else user.first_name
+                msg = await publish_announcement(client, uid)
+                if msg:
+                    info = user_data.get(uid, {})
+                    cat = info.get("category")
+                    author = username
+                    if cat == "job":
+                        category_name = "Annuncio di Lavoro"
+                    elif cat == "project":
+                        category_name = "Progetto"
+                    elif cat == "event":
+                        category_name = "Evento"
+                    elif cat == "profile":
+                        category_name = "Profilo"
+                    else:
+                        category_name = cat.capitalize() if cat else ""
+                    # Messaggio di conferma in privato con comando elimina
+                    conferma = (
+                        f"✅ {category_name} pubblicato!\n"
+                        f"ID annuncio: {msg.id}\n"
+                        f"Pubblicato da: {author}\n\n"
+                        f"Per eliminare questo annuncio, invia:\n"
+                        f"/elimina {msg.id}"
+                    )
+                    menu_btn = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
+                    ])
+                    await client.send_message(uid, conferma, reply_markup=menu_btn)
                 text = "✅ Pubblicato!"
             else:
                 text = "❌ Inserimento annullato."
+                # Se annullato, elimina anche l'anteprima
+                preview_id = user_data.get(uid, {}).get("preview_msg_id")
+                if preview_id:
+                    await safe_delete(client, chat_id, preview_id)
 
+            # Elimina tutti i messaggi temporanei tranne l'anteprima (se pubblicato)
+            preview_id = user_data.get(uid, {}).get("preview_msg_id")
             for mid in user_data.get(uid, {}).get("messages_to_delete", []):
+                if data.startswith("confirm_") and preview_id and mid == preview_id:
+                    continue  # NON eliminare l'anteprima se pubblicato
                 await safe_delete(client, chat_id, mid)
             user_data[uid]["messages_to_delete"].clear()
-            await send_clean_message(client, user_id, chat_id, text)
+            menu_btn = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
+            ])
+            if not data.startswith("confirm_"):
+                await send_clean_message(client, user_id, chat_id, text, menu_btn)
             user_data.pop(uid, None)
 
+        # Torna alla domanda precedente
         elif data == "back_to_question":
             info = user_data[user_id]
             if info["step"] > 0:
@@ -176,18 +236,22 @@ async def callback_handler(client, callback_query: CallbackQuery):
                 info["messages_to_delete"].clear()
 
                 q = CATEGORY_QUESTIONS[info["category"]][info["step"]]["question"]
+                question_data = CATEGORY_QUESTIONS[info["category"]][info["step"]]
+                buttons = [
+                    [InlineKeyboardButton("⬅️ Torna alla domanda precedente", callback_data="back_to_question")]
+                ]
+                if question_data.get("skippable"):
+                    buttons.insert(0, [InlineKeyboardButton("⏭️ Salta questa domanda", callback_data="skip_question")])
+                buttons.append([InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")])
                 await send_clean_message(
                     client,
                     user_id,
                     chat_id,
                     q,
-                    InlineKeyboardMarkup([
-                        [InlineKeyboardButton("⬅️ Torna alla domanda precedente", callback_data="back_to_question")],
-                        [InlineKeyboardButton("⏭️ Salta questa domanda", callback_data="skip_question")],
-                        [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
-                    ])
+                    InlineKeyboardMarkup(buttons)
                 )
 
+        # Salta domanda skippabile
         elif data == "skip_question":
             info = user_data[user_id]
             cat = info["category"]
@@ -197,20 +261,47 @@ async def callback_handler(client, callback_query: CallbackQuery):
             info["step"] += 1
 
             if info["step"] < len(CATEGORY_QUESTIONS[cat]):
-                next_q = CATEGORY_QUESTIONS[cat][info["step"]]["question"]
-                buttons = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("⬅️ Torna alla domanda precedente", callback_data="back_to_question")],
-                    [InlineKeyboardButton("⏭️ Salta questa domanda", callback_data="skip_question")],
-                    [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
-                ])
-                await send_clean_message(client, user_id, chat_id, next_q, buttons)
+                next_question_data = CATEGORY_QUESTIONS[cat][info["step"]]
+                next_q = next_question_data["question"]
+                buttons = [
+                    [InlineKeyboardButton("⬅️ Torna alla domanda precedente", callback_data="back_to_question")]
+                ]
+                if next_question_data.get("skippable"):
+                    buttons.insert(0, [InlineKeyboardButton("⏭️ Salta questa domanda", callback_data="skip_question")])
+                buttons.append([InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")])
+                await send_clean_message(client, user_id, chat_id, next_q, InlineKeyboardMarkup(buttons))
             else:
-                announcement_text = f"📢 **Anteprima del tuo {cat.capitalize()}**\n\n"
+                # Mostra anteprima finale
+                info = user_data[user_id]
+                cat = info["category"]
+                user = await client.get_users(user_id)
+                if cat == "job":
+                    category_name = "Annuncio di Lavoro"
+                elif cat == "project":
+                    category_name = "Progetto"
+                elif cat == "event":
+                    category_name = "Evento"
+                elif cat == "profile":
+                    category_name = "Profilo"
+                else:
+                    category_name = cat.capitalize() if cat else ""
+                author = f"@{user.username}" if user.username else user.first_name
+                announcement_text = f"Nuovo {category_name}.\nPubblicato da {author}\n\n"
                 for label, a in info["answers"].items():
                     if a != "Saltato.":
-                        announcement_text += f"**{label}**\n{a}\n\n"
+                        announcement_text += f"{label}\n{a}\n\n"
 
-                await client.send_message(chat_id, announcement_text)
+                file_id = info.get("file")
+                file_type = info.get("file_type")
+                if file_id:
+                    if file_type == "photo":
+                        preview_msg = await client.send_photo(chat_id, file_id, caption=announcement_text)
+                    else:
+                        preview_msg = await client.send_document(chat_id, file_id, caption=announcement_text)
+                else:
+                    preview_msg = await client.send_message(chat_id, announcement_text)
+                user_data[user_id]["preview_msg_id"] = preview_msg.id
+
                 confirm_btns = InlineKeyboardMarkup([
                     [InlineKeyboardButton("✅ Conferma", callback_data=f"confirm_{user_id}")],
                     [InlineKeyboardButton("❌ Annulla", callback_data=f"cancel_{user_id}")],
@@ -222,10 +313,13 @@ async def callback_handler(client, callback_query: CallbackQuery):
         logging.exception("Errore nel callback handler")
         await send_clean_message(client, user_id, chat_id, f"❌ Errore: {str(e)}")
 
-# ------------------------ RACCOLTA DATI ------------------------
+# ------------------------ RACCOLTA DATI UTENTE ------------------------
 
 @bot.on_message(filters.private & ~filters.command("start"))
 async def collect_data_handler(client, message: Message):
+    """
+    Gestisce la raccolta delle risposte dell'utente alle domande.
+    """
     user_id = message.from_user.id
     if user_id not in user_data:
         return
@@ -240,6 +334,7 @@ async def collect_data_handler(client, message: Message):
         question_text = question_data["question"]
         label_text = question_data["label"]
 
+        # Gestione allegati (foto/documenti)
         if message.photo or message.document:
             info["answers"][label_text] = "📎 File allegato."
             info["file"] = message.photo.file_id if message.photo else message.document.file_id
@@ -252,20 +347,45 @@ async def collect_data_handler(client, message: Message):
 
         info["step"] += 1
         if info["step"] < len(CATEGORY_QUESTIONS[cat]):
-            next_q = CATEGORY_QUESTIONS[cat][info["step"]]["question"]
-            buttons = InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ Torna alla domanda precedente", callback_data="back_to_question")],
-                [InlineKeyboardButton("⏭️ Salta questa domanda", callback_data="skip_question")],
-                [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
-            ])
-            await send_clean_message(client, user_id, message.chat.id, next_q, buttons)
+            # Mostra la domanda successiva
+            question_data = CATEGORY_QUESTIONS[cat][info["step"]]
+            buttons = [
+                [InlineKeyboardButton("⬅️ Torna alla domanda precedente", callback_data="back_to_question")]
+            ]
+            if question_data.get("skippable"):
+                buttons.insert(0, [InlineKeyboardButton("⏭️ Salta questa domanda", callback_data="skip_question")])
+            buttons.append([InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")])
+            await send_clean_message(client, user_id, message.chat.id, question_data["question"], InlineKeyboardMarkup(buttons))
         else:
-            announcement_text = f"📢 **Anteprima del tuo {cat.capitalize()}**\n\n"
+            # Mostra anteprima finale identica all'annuncio pubblico
+            user = await client.get_users(user_id)
+            if cat == "job":
+                category_name = "Annuncio di Lavoro"
+            elif cat == "project":
+                category_name = "Progetto"
+            elif cat == "event":
+                category_name = "Evento"
+            elif cat == "profile":
+                category_name = "Profilo"
+            else:
+                category_name = cat.capitalize() if cat else ""
+            author = f"@{user.username}" if user.username else user.first_name
+            announcement_text = f"Nuovo {category_name}.\nPubblicato da {author}\n\n"
             for label, a in info["answers"].items():
                 if a != "Saltato.":
-                    announcement_text += f"**{label}**\n{a}\n\n"
+                    announcement_text += f"{label}\n{a}\n\n"
 
-            await client.send_message(message.chat.id, announcement_text)
+            file_id = info.get("file")
+            file_type = info.get("file_type")
+            if file_id:
+                if file_type == "photo":
+                    preview_msg = await client.send_photo(message.chat.id, file_id, caption=announcement_text)
+                else:
+                    preview_msg = await client.send_document(message.chat.id, file_id, caption=announcement_text)
+            else:
+                preview_msg = await client.send_message(message.chat.id, announcement_text)
+            user_data[user_id]["preview_msg_id"] = preview_msg.id
+
             confirm_btns = InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ Conferma", callback_data=f"confirm_{user_id}")],
                 [InlineKeyboardButton("❌ Annulla", callback_data=f"cancel_{user_id}")],
@@ -276,35 +396,87 @@ async def collect_data_handler(client, message: Message):
     except Exception as e:
         logging.exception("Errore nella raccolta dati")
 
-# ------------------------ PUBBLICAZIONE ------------------------
+# ------------------------ PUBBLICAZIONE ANNUNCIO ------------------------
 
 async def publish_announcement(client, user_id):
+    """
+    Pubblica l'annuncio nel gruppo/canale.
+    Per privacy e semplicità, non viene usato alcun database: l'autore viene riconosciuto tramite il testo pubblicato.
+    """
     info = user_data.get(user_id)
     if not info:
         return
 
     cat = info["category"]
-    text = f"📢 **Nuovo {cat.capitalize()}**\n\n"
+    user = await client.get_users(user_id)
+    if cat == "job":
+        category_name = "Annuncio di Lavoro"
+    elif cat == "project":
+        category_name = "Progetto"
+    elif cat == "event":
+        category_name = "Evento"
+    elif cat == "profile":
+        category_name = "Profilo"
+    else:
+        category_name = cat.capitalize() if cat else ""
+    author = f"@{user.username}" if user.username else user.first_name
+    announcement_text = f"Nuovo {category_name}.\nPubblicato da {author}\n\n"
     for label, a in info["answers"].items():
         if a != "Saltato.":
-            text += f"**{label}**\n{a}\n\n"
+            announcement_text += f"{label}\n{a}\n\n"
 
-    pointer_id = POINTER_MESSAGE_IDS.get(cat)
     file_id = info.get("file")
-
-    if pointer_id:
-        try:
-            if file_id:
-                if info.get("file_type") == "photo":
-                    await client.send_photo(CHAT_ID, file_id, caption=text, reply_to_message_id=pointer_id)
-                else:
-                    await client.send_document(CHAT_ID, file_id, caption=text, reply_to_message_id=pointer_id)
+    file_type = info.get("file_type")
+    # Pyrogram non permette di pubblicare direttamente nei topic: si risponde a un messaggio fisso (pointer)
+    pointer_id = POINTER_MESSAGE_IDS.get(cat)
+    try:
+        if file_id:
+            if file_type == "photo":
+                msg = await client.send_photo(CHAT_ID, file_id, caption=announcement_text, reply_to_message_id=pointer_id)
             else:
-                await client.send_message(CHAT_ID, text, reply_to_message_id=pointer_id)
-        except Exception as e:
-            logging.exception(f"Errore durante la pubblicazione: {e}")
+                msg = await client.send_document(CHAT_ID, file_id, caption=announcement_text, reply_to_message_id=pointer_id)
+        else:
+            msg = await client.send_message(CHAT_ID, announcement_text, reply_to_message_id=pointer_id)
+        return msg
+    except Exception as e:
+        logging.exception(f"Errore durante la pubblicazione: {e}")
+        return None
 
-# ------------------------ AVVIO ------------------------
+# ------------------------ ELIMINAZIONE ANNUNCIO ------------------------
+
+@bot.on_message(filters.command("elimina") & filters.private)
+async def elimina_annuncio_handler(client, message: Message):
+    """
+    Permette all'utente di eliminare un proprio annuncio pubblicato.
+    Per privacy e semplicità, non viene usato alcun database: il bot verifica che l'autore sia nel testo dell'annuncio.
+    """
+    user = message.from_user
+    parts = message.text.strip().split()
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.reply("❌ Uso corretto: /elimina <ID_annuncio>")
+        return
+
+    msg_id = int(parts[1])
+    try:
+        msg = await client.get_messages(CHAT_ID, msg_id)
+        if not msg or (not msg.text and not msg.caption):
+            await message.reply("❌ Impossibile trovare l'annuncio con questo ID.")
+            return
+
+        username = f"@{user.username}" if user.username else user.first_name
+        testo = msg.text or msg.caption or ""
+        # L'autore viene riconosciuto dal testo pubblicato, non da un database
+        if username not in testo:
+            await message.reply("❌ Non sei l'autore di questo annuncio e non puoi eliminarlo.")
+            return
+
+        await client.delete_messages(CHAT_ID, msg_id)
+        await message.reply("✅ Annuncio eliminato con successo.")
+    except Exception as e:
+        logging.exception("Errore durante l'eliminazione dell'annuncio con /elimina")
+        await message.reply("❌ Errore durante l'eliminazione dell'annuncio.")
+
+# ------------------------ AVVIO BOT ------------------------
 
 if __name__ == "__main__":
     logging.info("🤖 Avvio bot...")
