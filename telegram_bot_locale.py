@@ -33,14 +33,14 @@ CATEGORY_QUESTIONS = {
         {"question": "💼 Inserisci il TITOLO LAVORATIVO che cerchi (es. Fonico):", "label": "💼 Titolo lavorativo richiesto:"},
         {"question": "📜 DESCRIVI LA MANSIONE e ciò di cui si dovrà occupare:", "label": "📜 Descrizione mansione:"},
         {"question": "📍 Inserisci il LUOGO in cui richiedi questa figura:", "label": "📍 Luogo del Lavoro:"},
-        {"question": "📞 Inserisci i tuoi CONTATTI (Telefono, Email, Telegram):", "label": "📞 Contatti:"}
+        {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:"}
     ],
     "project": [
         {"question": "💡 Inserisci il TITOLO DEL PROGETTO:", "label": "💡 Titolo del Progetto:"},
         {"question": "📜 DESCRIVI IL TUO PROGETTO e spiega a quali ambiti è riferito:", "label": "📜 Descrizione del Progetto:"},
         {"question": "🔗 Inserisci un LINK (opzionale):", "label": "🔗 Link:"},
         {"question": "📌 Puoi CARICARE UN FILE (opzionale):", "label": "📌 File allegato:"},
-        {"question": "📞 CONTATTI (Telefono, Email, Telegram):", "label": "📞 Contatti:"}
+        {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:"}
     ],
     "event": [
         {"question": "🎫 Inserisci il NOME DELL'EVENTO:", "label": "🎫 Nome evento:"},
@@ -48,7 +48,7 @@ CATEGORY_QUESTIONS = {
         {"question": "📍 Inserisci il LUOGO:", "label": "📍 Luogo:"},
         {"question": "⏰ Inserisci la DATA E ORA:", "label": "⏰ Data e ora:"},
         {"question": "💰 Inserisci il COSTO del BIGLIETTO:", "label": "💰 Costo biglietto:"},
-        {"question": "📞 Inserisci i CONTATTI (Telefono, email, Telegram):", "label": "📞 Contatti:"}
+        {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:"}
     ],
     "profile": [
         {"question": "👤 Inserisci il tuo NOME E COGNOME:", "label": "👤 Nome e cognome:"},
@@ -56,7 +56,7 @@ CATEGORY_QUESTIONS = {
         {"question": "📜 Breve descrizione delle competenze (max. 5 righe):", "label": "📜 Competenze:"},
         {"question": "📎 Puoi allegare il file del TUO CURRICULUM (word o pdf):", "label": "📝 Curriculum:"},
         {"question": "🔗 LINK al tuo Profilo LinkedIn:", "label": "🔗 Profilo LinkedIn:"},
-        {"question": "📞 Inserisci i tuoi CONTATTI (Telefono, Email, Telegram):", "label": "📞 Contatti:"}
+        {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:"}
     ]
 }
 
