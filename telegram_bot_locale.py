@@ -33,14 +33,14 @@ CATEGORY_QUESTIONS = {
         {"question": "💼 Inserisci il TITOLO LAVORATIVO che cerchi (es. Fonico):", "label": "💼 Titolo lavorativo richiesto:"},
         {"question": "📜 DESCRIVI LA MANSIONE e ciò di cui si dovrà occupare:", "label": "📜 Descrizione mansione:"},
         {"question": "📍 Inserisci il LUOGO in cui richiedi questa figura:", "label": "📍 Luogo del Lavoro:"},
-        {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:"}
+        {"question": "📞 Inserisci i tuoi CONTATTI (Telefono, Email, Telegram):", "label": "📞 Contatti:"}
     ],
     "project": [
         {"question": "💡 Inserisci il TITOLO DEL PROGETTO:", "label": "💡 Titolo del Progetto:"},
         {"question": "📜 DESCRIVI IL TUO PROGETTO e spiega a quali ambiti è riferito:", "label": "📜 Descrizione del Progetto:"},
-        {"question": "📌 Puoi CARICARE UN FILE (opzionale):", "label": "📌 File allegato:"},
         {"question": "🔗 Inserisci un LINK (opzionale):", "label": "🔗 Link:"},
-        {"question": "📞 CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:"}
+        {"question": "📌 Puoi CARICARE UN FILE (opzionale):", "label": "📌 File allegato:"},
+        {"question": "📞 CONTATTI (Telefono, Email, Telegram):", "label": "📞 Contatti:"}
     ],
     "event": [
         {"question": "🎫 Inserisci il NOME DELL'EVENTO:", "label": "🎫 Nome evento:"},
@@ -48,7 +48,7 @@ CATEGORY_QUESTIONS = {
         {"question": "📍 Inserisci il LUOGO:", "label": "📍 Luogo:"},
         {"question": "⏰ Inserisci la DATA E ORA:", "label": "⏰ Data e ora:"},
         {"question": "💰 Inserisci il COSTO del BIGLIETTO:", "label": "💰 Costo biglietto:"},
-        {"question": "📞 Inserisci i CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:"}
+        {"question": "📞 Inserisci i CONTATTI (Telefono, email, Telegram):", "label": "📞 Contatti:"}
     ],
     "profile": [
         {"question": "👤 Inserisci il tuo NOME E COGNOME:", "label": "👤 Nome e cognome:"},
@@ -56,7 +56,7 @@ CATEGORY_QUESTIONS = {
         {"question": "📜 Breve descrizione delle competenze (max. 5 righe):", "label": "📜 Competenze:"},
         {"question": "📎 Puoi allegare il file del TUO CURRICULUM (word o pdf):", "label": "📝 Curriculum:"},
         {"question": "🔗 LINK al tuo Profilo LinkedIn:", "label": "🔗 Profilo LinkedIn:"},
-        {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:"}
+        {"question": "📞 Inserisci i tuoi CONTATTI (Telefono, Email, Telegram):", "label": "📞 Contatti:"}
     ]
 }
 
@@ -183,9 +183,40 @@ async def callback_handler(client, callback_query: CallbackQuery):
                     q,
                     InlineKeyboardMarkup([
                         [InlineKeyboardButton("⬅️ Torna alla domanda precedente", callback_data="back_to_question")],
+                        [InlineKeyboardButton("⏭️ Salta questa domanda", callback_data="skip_question")],
                         [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
                     ])
                 )
+
+        elif data == "skip_question":
+            info = user_data[user_id]
+            cat = info["category"]
+            step = info["step"]
+            label_text = CATEGORY_QUESTIONS[cat][step]["label"]
+            info["answers"][label_text] = "Saltato."
+            info["step"] += 1
+
+            if info["step"] < len(CATEGORY_QUESTIONS[cat]):
+                next_q = CATEGORY_QUESTIONS[cat][info["step"]]["question"]
+                buttons = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ Torna alla domanda precedente", callback_data="back_to_question")],
+                    [InlineKeyboardButton("⏭️ Salta questa domanda", callback_data="skip_question")],
+                    [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
+                ])
+                await send_clean_message(client, user_id, chat_id, next_q, buttons)
+            else:
+                announcement_text = f"📢 **Anteprima del tuo {cat.capitalize()}**\n\n"
+                for label, a in info["answers"].items():
+                    if a != "Saltato.":
+                        announcement_text += f"**{label}**\n{a}\n\n"
+
+                await client.send_message(chat_id, announcement_text)
+                confirm_btns = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✅ Conferma", callback_data=f"confirm_{user_id}")],
+                    [InlineKeyboardButton("❌ Annulla", callback_data=f"cancel_{user_id}")],
+                    [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
+                ])
+                await send_clean_message(client, user_id, chat_id, "✅ Confermi di voler pubblicare questo annuncio?", confirm_btns)
 
     except Exception as e:
         logging.exception("Errore nel callback handler")
@@ -224,24 +255,17 @@ async def collect_data_handler(client, message: Message):
             next_q = CATEGORY_QUESTIONS[cat][info["step"]]["question"]
             buttons = InlineKeyboardMarkup([
                 [InlineKeyboardButton("⬅️ Torna alla domanda precedente", callback_data="back_to_question")],
+                [InlineKeyboardButton("⏭️ Salta questa domanda", callback_data="skip_question")],
                 [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
             ])
             await send_clean_message(client, user_id, message.chat.id, next_q, buttons)
         else:
             announcement_text = f"📢 **Anteprima del tuo {cat.capitalize()}**\n\n"
             for label, a in info["answers"].items():
-                announcement_text += f"**{label}**\n{a}\n\n"
+                if a != "Saltato.":
+                    announcement_text += f"**{label}**\n{a}\n\n"
 
-            # Invia l'anteprima includendo l'immagine allegata, se presente
-            file_id = info.get("file")
-            if file_id:
-                if info.get("file_type") == "photo":
-                    preview_message = await client.send_photo(message.chat.id, file_id, caption=announcement_text)
-                else:
-                    preview_message = await client.send_document(message.chat.id, file_id, caption=announcement_text)
-            else:
-                preview_message = await client.send_message(message.chat.id, announcement_text)
-
+            await client.send_message(message.chat.id, announcement_text)
             confirm_btns = InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ Conferma", callback_data=f"confirm_{user_id}")],
                 [InlineKeyboardButton("❌ Annulla", callback_data=f"cancel_{user_id}")],
@@ -262,7 +286,8 @@ async def publish_announcement(client, user_id):
     cat = info["category"]
     text = f"📢 **Nuovo {cat.capitalize()}**\n\n"
     for label, a in info["answers"].items():
-        text += f"**{label}**\n{a}\n\n"
+        if a != "Saltato.":
+            text += f"**{label}**\n{a}\n\n"
 
     pointer_id = POINTER_MESSAGE_IDS.get(cat)
     file_id = info.get("file")
