@@ -190,18 +190,22 @@ async def callback_handler(client, callback_query: CallbackQuery):
                         category_name = "Profilo"
                     else:
                         category_name = cat.capitalize() if cat else ""
-                    # Messaggio di conferma in privato con comando elimina
                     conferma = (
                         f"✅ {category_name} pubblicato!\n"
                         f"ID annuncio: {msg.id}\n"
                         f"Pubblicato da: {author}\n\n"
-                        f"Per eliminare questo annuncio, invia:\n"
-                        f"/elimina {msg.id}"
+                        f"Puoi eliminare questo annuncio in qualsiasi momento premendo il bottone qui sotto."
                     )
+                    # Bottone elimina con callback contenente l'ID del messaggio pubblico e l'ID della preview privata
+                    preview_id = user_data[uid].get("preview_msg_id")
                     menu_btn = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🗑️ Elimina questo annuncio", callback_data=f"delete_{msg.id}_{preview_id}")],
                         [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
                     ])
-                    await client.send_message(uid, conferma, reply_markup=menu_btn)
+                    # Invia il messaggio di conferma SENZA aggiungerlo a messages_to_delete!
+                    confirm_msg = await client.send_message(uid, conferma, reply_markup=menu_btn)
+                    # Salva l'ID del messaggio di conferma per poterlo eliminare dopo
+                    user_data[uid]["confirm_msg_id"] = confirm_msg.id
                 text = "✅ Pubblicato!"
             else:
                 text = "❌ Inserimento annullato."
