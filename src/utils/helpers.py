@@ -1,3 +1,4 @@
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import logging
 from pyrogram import errors
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -7,6 +8,8 @@ from utils.state import user_data
 from questions import CATEGORY_QUESTIONS, POINTER_MESSAGE_IDS
 
 # ---------- Safe delete ----------
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(min=4, max=60),
@@ -96,3 +99,29 @@ async def send_clean_message(client, user_id: int, chat_id: int, text: str, repl
     })
     user_data[user_id]["last_bot_message_id"] = sent.id
     user_data[user_id]["messages_to_delete"].append(sent.id)
+
+
+async def publish_preview_and_confirm(client, user_id: int, info: dict) -> int:
+    """
+    1) Send private preview (without ID)
+    2) Ask for confirmation
+    3) Save preview_msg_id and confirm_msg_id in user_data
+    4) Return preview_msg_id
+    """
+    preview_id = await send_preview(client, user_id, info)
+    info["preview_msg_id"] = preview_id
+
+    confirm_btns = InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "✅ Conferma", callback_data=f"confirm_{user_id}")],
+        [InlineKeyboardButton(
+            "❌ Annulla",  callback_data=f"cancel_{user_id}")],
+        [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
+    ])
+    cmsg = await client.send_message(
+        user_id,
+        "✅ Confermi di voler pubblicare questo annuncio?",
+        reply_markup=confirm_btns
+    )
+    info["confirm_msg_id"] = cmsg.id
+    return preview_id
