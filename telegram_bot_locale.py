@@ -206,11 +206,11 @@ async def start_handler(client, message: Message):
 @bot.on_message(filters.private & ~filters.command("start"))
 async def collect_data_handler(client, message: Message):
     user = message.from_user
-    # Non serve più il controllo qui
     if user.id not in user_data:
         user_data[user.id] = {"user_messages_to_delete": []}
     if "user_messages_to_delete" not in user_data[user.id]:
         user_data[user.id]["user_messages_to_delete"] = []
+    # Salva l'ID della risposta dell'utente
     user_data[user.id]["user_messages_to_delete"].append(message.id)
     if user.id not in user_data:
         return
@@ -230,6 +230,20 @@ async def collect_data_handler(client, message: Message):
                 info["answers"][label_text] = "Saltato."
             else:
                 info["answers"][label_text] = message.text.strip()
+        # Elimina la domanda precedente del bot (se presente)
+        if info.get("messages_to_delete"):
+            last_bot_msg = info["messages_to_delete"].pop()
+            try:
+                await client.delete_messages(user.id, last_bot_msg)
+            except Exception:
+                pass
+        # Elimina la risposta dell'utente
+        for mid in user_data[user.id].get("user_messages_to_delete", []):
+            try:
+                await client.delete_messages(user.id, mid)
+            except Exception:
+                pass
+        user_data[user.id]["user_messages_to_delete"].clear()
         info["step"] += 1
         if info["step"] < len(CATEGORY_QUESTIONS[cat]):
             question_data = CATEGORY_QUESTIONS[cat][info["step"]]
@@ -239,7 +253,11 @@ async def collect_data_handler(client, message: Message):
             if question_data.get("skippable"):
                 buttons.insert(0, [InlineKeyboardButton("⏭️ Salta questa domanda", callback_data="skip_question")])
             buttons.append([InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")])
-            await send_clean_message(client, user.id, message.chat.id, question_data["question"], InlineKeyboardMarkup(buttons))
+            sent = await client.send_message(user.id, question_data["question"], reply_markup=InlineKeyboardMarkup(buttons))
+            # Salva l'ID della domanda del bot
+            if "messages_to_delete" not in info:
+                info["messages_to_delete"] = []
+            info["messages_to_delete"].append(sent.id)
         else:
             # Preview privata SENZA ID
             preview_id = await send_preview(client, user.id, info)
@@ -253,12 +271,7 @@ async def collect_data_handler(client, message: Message):
             user_data[user.id]["confirm_msg_id"] = confirm_msg.id
     except Exception as e:
         logging.exception("Errore nella raccolta dati")
-    for mid in user_data[user.id].get("user_messages_to_delete", []):
-        try:
-            await client.delete_messages(user.id, mid)
-        except Exception:
-            pass
-    user_data[user.id]["user_messages_to_delete"].clear()
+
 
 # ------------------------ HANDLER CALLBACK ------------------------
 
