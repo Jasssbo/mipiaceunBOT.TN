@@ -12,11 +12,10 @@ load_dotenv("bot_infos.env")
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-BOT_USERNAME = os.getenv("BOT_USERNAME")
-CHAT_ID = int(os.getenv("CHAT_ID"))
+CHAT_ID =-1002461409137
 
-if not all([API_ID, API_HASH, BOT_TOKEN, BOT_USERNAME, CHAT_ID]):
-    missing = [var for var in ["API_ID", "API_HASH", "BOT_TOKEN", "BOT_USERNAME", "CHAT_ID"] if not locals()[var]]
+if not all([API_ID, API_HASH, BOT_TOKEN]):
+    missing = [var for var in ["API_ID", "API_HASH", "BOT_TOKEN"] if not locals()[var]]
     logging.critical(f"Missing required .env variables: {', '.join(missing)}")
     sys.exit(1)
 
@@ -154,10 +153,35 @@ async def send_clean_message(client, user_id, chat_id, text, reply_markup=None):
 
 # ------------------------ HANDLER /start ------------------------
 
+async def is_user_allowed(client, user_id):
+    try:
+        member = await client.get_chat_member(CHAT_ID, user_id)
+        # Puoi raffinare il controllo se vuoi solo membri effettivi (non banned/kicked)
+        return member.status in ("member", "administrator", "creator")
+    except Exception:
+        return False
+
+async def is_user_allowed_by_username(client, user):
+    try:
+        usernames = set()
+        async for member in client.get_chat_members(CHAT_ID):
+            if member.user.username:
+                usernames.add(member.user.username.lower())
+        logging.info(f"Usernames nel gruppo: {usernames}")
+        if user.username and user.username.lower() in usernames:
+            return True
+        return False
+    except Exception as e:
+        logging.exception("Errore durante il controllo username nel gruppo")
+        return False
+
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message: Message):
-    user_id = message.from_user.id
-    user_data[user_id] = {
+    user = message.from_user
+    if not await is_user_allowed_by_username(client, user):
+        await message.reply("❌  Solo gli utenti presenti nel gruppo possono usare il bot. Assicurati di avere un @username pubblico (nel tuo profilo) e di essere nel gruppo (https://t.me/TNet_Work).")
+        return
+    user_data[user.id] = {
         "step": 0,
         "answers": {},
         "messages_to_delete": [],
@@ -166,7 +190,8 @@ async def start_handler(client, message: Message):
         "file_type": None,
         "category": None,
         "preview_msg_id": None,
-        "confirm_msg_id": None
+        "confirm_msg_id": None,
+        "allowed": True
     }
     buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("📆 Evento", callback_data="new_event")],
@@ -174,17 +199,23 @@ async def start_handler(client, message: Message):
         [InlineKeyboardButton("💡 Call Pubblica per un Progetto", callback_data="new_project")],
         [InlineKeyboardButton("👤 Il Tuo Profilo Lavorativo", callback_data="new_profile")]
     ])
-    await send_clean_message(client, user_id, message.chat.id, "Benvenuto! Cosa vuoi pubblicare all'interno della Community?", buttons)
+    await send_clean_message(client, user.id, message.chat.id, "Benvenuto! Cosa vuoi pubblicare all'interno della Community?", buttons)
 
 # ------------------------ RACCOLTA DATI UTENTE ------------------------
 
 @bot.on_message(filters.private & ~filters.command("start"))
 async def collect_data_handler(client, message: Message):
-    user_id = message.from_user.id
-    if user_id not in user_data:
+    user = message.from_user
+    # Non serve più il controllo qui
+    if user.id not in user_data:
+        user_data[user.id] = {"user_messages_to_delete": []}
+    if "user_messages_to_delete" not in user_data[user.id]:
+        user_data[user.id]["user_messages_to_delete"] = []
+    user_data[user.id]["user_messages_to_delete"].append(message.id)
+    if user.id not in user_data:
         return
     try:
-        info = user_data[user_id]
+        info = user_data[user.id]
         cat = info["category"]
         step = info["step"]
         question_data = CATEGORY_QUESTIONS[cat][step]
@@ -208,20 +239,26 @@ async def collect_data_handler(client, message: Message):
             if question_data.get("skippable"):
                 buttons.insert(0, [InlineKeyboardButton("⏭️ Salta questa domanda", callback_data="skip_question")])
             buttons.append([InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")])
-            await send_clean_message(client, user_id, message.chat.id, question_data["question"], InlineKeyboardMarkup(buttons))
+            await send_clean_message(client, user.id, message.chat.id, question_data["question"], InlineKeyboardMarkup(buttons))
         else:
             # Preview privata SENZA ID
-            preview_id = await send_preview(client, user_id, info)
-            user_data[user_id]["preview_msg_id"] = preview_id
+            preview_id = await send_preview(client, user.id, info)
+            user_data[user.id]["preview_msg_id"] = preview_id
             confirm_btns = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Conferma", callback_data=f"confirm_{user_id}")],
-                [InlineKeyboardButton("❌ Annulla", callback_data=f"cancel_{user_id}")],
+                [InlineKeyboardButton("✅ Conferma", callback_data=f"confirm_{user.id}")],
+                [InlineKeyboardButton("❌ Annulla", callback_data=f"cancel_{user.id}")],
                 [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
             ])
-            confirm_msg = await client.send_message(user_id, "✅ Confermi di voler pubblicare questo annuncio?", reply_markup=confirm_btns)
-            user_data[user_id]["confirm_msg_id"] = confirm_msg.id
+            confirm_msg = await client.send_message(user.id, "✅ Confermi di voler pubblicare questo annuncio?", reply_markup=confirm_btns)
+            user_data[user.id]["confirm_msg_id"] = confirm_msg.id
     except Exception as e:
         logging.exception("Errore nella raccolta dati")
+    for mid in user_data[user.id].get("user_messages_to_delete", []):
+        try:
+            await client.delete_messages(user.id, mid)
+        except Exception:
+            pass
+    user_data[user.id]["user_messages_to_delete"].clear()
 
 # ------------------------ HANDLER CALLBACK ------------------------
 
@@ -229,7 +266,6 @@ async def collect_data_handler(client, message: Message):
 async def callback_handler(client, callback_query: CallbackQuery):
     data = callback_query.data
     user_id = callback_query.from_user.id
-
     try:
         if data.startswith("new_"):
             cat = data.replace("new_", "")
@@ -243,8 +279,11 @@ async def callback_handler(client, callback_query: CallbackQuery):
                     [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
                 ])
             )
-
         elif data == "back_to_menu":
+            user = await client.get_users(user_id)
+            if not await is_user_allowed_by_username(client, user):
+                await client.send_message(user_id, "❌ Solo gli utenti presenti nel gruppo possono pubblicare. Assicurati di avere un @username pubblico (nel tuo profilo) e di essere nel gruppo (https://t.me/TNet_Work).")
+                return
             if user_id in user_data:
                 for mid in user_data[user_id].get("messages_to_delete", []):
                     await safe_delete(client, user_id, mid)
@@ -256,19 +295,19 @@ async def callback_handler(client, callback_query: CallbackQuery):
                 [InlineKeyboardButton("👤 Il Tuo Profilo Lavorativo", callback_data="new_profile")]
             ])
             await send_clean_message(client, user_id, user_id, "🏠 Sei tornato al menù principale. Cosa vuoi pubblicare nella Community?", buttons)
-
         elif data.startswith("confirm_"):
             uid = int(data.split("_")[1])
+            user = await client.get_users(uid)
+            if not await is_user_allowed_by_username(client, user):
+                await client.send_message(uid, "❌ Solo gli utenti presenti nel gruppo possono pubblicare. Assicurati di avere un @username pubblico (nel tuo profilo) e di essere nel gruppo (https://t.me/TNet_Work).")
+                return
             info = user_data[uid]
             msg = await publish_announcement(client, uid, info)
             if msg:
-                # Aggiorna la preview con l'ID reale
                 preview_id = info.get("preview_msg_id")
                 if preview_id:
                     await update_preview_with_id(client, uid, preview_id, info, msg.id)
-                # Elimina il messaggio con i bottoni conferma/annulla
                 await client.delete_messages(uid, callback_query.message.id)
-                # Messaggio di conferma pubblicazione con bottone elimina
                 conferma = (
                     f"✅ Annuncio pubblicato!\n"
                     f"ID annuncio: {msg.id}\n"
@@ -280,7 +319,28 @@ async def callback_handler(client, callback_query: CallbackQuery):
                 ])
                 confirm_msg = await client.send_message(uid, conferma, reply_markup=menu_btn)
                 user_data[uid]["confirm_msg_id"] = confirm_msg.id
-
+        elif data.startswith("cancel_"):
+            uid = int(data.split("_")[1])
+            user = await client.get_users(uid)
+            if not await is_user_allowed_by_username(client, user):
+                await client.send_message(uid, "❌ Solo gli utenti presenti nel gruppo possono pubblicare. Assicurati di avere un @username pubblico (nel tuo profilo) e di essere nel gruppo (https://t.me/TNet_Work).")
+                return
+            # Elimina i messaggi di preview e conferma
+            info = user_data.get(uid, {})
+            preview_id = info.get("preview_msg_id")
+            confirm_id = info.get("confirm_msg_id")
+            if preview_id:
+                await safe_delete(client, uid, preview_id)
+            if confirm_id:
+                await safe_delete(client, uid, confirm_id)
+            user_data.pop(uid, None)
+            buttons = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📆 Evento", callback_data="new_event")],
+                [InlineKeyboardButton("💼 Annuncio di Lavoro", callback_data="new_job")],
+                [InlineKeyboardButton("💡 Call Pubblica per un Progetto", callback_data="new_project")],
+                [InlineKeyboardButton("👤 Il Tuo Profilo Lavorativo", callback_data="new_profile")]
+            ])
+            await send_clean_message(client, uid, uid, "❌ Annuncio annullato. Sei tornato al menù principale.", buttons)
         elif data.startswith("delete_"):
             try:
                 parts = data.split("_")
