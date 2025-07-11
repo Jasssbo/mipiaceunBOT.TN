@@ -142,9 +142,12 @@ async def publish_announcement(client, user_id, info):
     return msg
 
 async def send_clean_message(client, user_id, chat_id, text, reply_markup=None):
-    last_msg_id = user_data.get(user_id, {}).get("last_bot_message_id")
-    if last_msg_id:
-        await safe_delete(client, chat_id, last_msg_id)
+    # Elimina TUTTI i messaggi precedenti del bot per quell'utente
+    for mid in user_data.get(user_id, {}).get("messages_to_delete", []):
+        await safe_delete(client, chat_id, mid)
+    # Svuota la lista dopo la cancellazione
+    if user_id in user_data:
+        user_data[user_id]["messages_to_delete"] = []
     sent = await client.send_message(chat_id, text, reply_markup=reply_markup)
     if user_id not in user_data:
         user_data[user_id] = {"last_bot_message_id": None, "messages_to_delete": []}
