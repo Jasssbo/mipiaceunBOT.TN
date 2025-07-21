@@ -69,6 +69,10 @@ POINTER_MESSAGE_IDS = {
 
 user_data = {}
 
+# Definisci gli ID dei topic consentiti e NON consentiti
+ALLOWED_TOPIC_IDS = [1]  # Sostituisci con gli ID dei topic dove SOLO il bot può pubblicare
+NOT_ALLOWED_TOPIC_IDS = [10, 11, 12, 28]  # Sostituisci con gli ID dei topic dove NESSUNO può pubblicare
+
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=4, max=60),
        retry=retry_if_exception_type((errors.FloodWait, errors.RPCError)))
 async def safe_delete(client, chat_id, message_id):
@@ -468,6 +472,31 @@ async def elimina_annuncio_handler(client, message: Message):
     except Exception as e:
         logging.exception("Errore durante l'eliminazione dell'annuncio con /elimina")
         await message.reply("❌ Errore durante l'eliminazione dell'annuncio.")
+
+# ------------------------ TOPIC GUARDIAN ------------------------
+
+ALLOWED_TOPIC_ID = 1  # Sostituisci con l'ID del topic dove gli utenti possono scrivere liberamente
+FORBIDDEN_TOPIC_IDS = [10, 11, 12, 28]  # Sostituisci con gli ID dei topic dove solo il bot può pubblicare
+
+@bot.on_message(filters.group)
+async def topic_guardian_handler(client, message: Message):
+    # Ignora i messaggi del bot
+    if message.from_user and message.from_user.is_self:
+        return
+    # Se il messaggio è nel topic consentito, lascia passare
+    if message.message_thread_id == ALLOWED_TOPIC_ID:
+        return
+    # Se il messaggio è in uno dei topic vietati
+    if message.message_thread_id in FORBIDDEN_TOPIC_IDS:
+        try:
+            await client.delete_messages(message.chat.id, message.id)
+            await client.send_message(
+                message.chat.id,
+                "❌ Solo il bot può pubblicare in questo topic.",
+                reply_to_message_id=message.id
+            )
+        except Exception:
+            pass
 
 # ------------------------ AVVIO BOT ------------------------
 
