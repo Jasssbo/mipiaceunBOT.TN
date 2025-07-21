@@ -136,6 +136,9 @@ async def publish_announcement(client, user_id, info):
     file_id = info.get("file")
     file_type = info.get("file_type")
     pointer_id = POINTER_MESSAGE_IDS.get(info["category"])
+    username = user.username if user.username else user.first_name
+    presente = await is_user_allowed_by_username(client, user)
+    msg = None
     if file_id:
         if file_type == "photo":
             msg = await client.send_photo(CHAT_ID, file_id, caption=text, reply_to_message_id=pointer_id)
@@ -143,6 +146,8 @@ async def publish_announcement(client, user_id, info):
             msg = await client.send_document(CHAT_ID, file_id, caption=text, reply_to_message_id=pointer_id)
     else:
         msg = await client.send_message(CHAT_ID, text, reply_to_message_id=pointer_id)
+    ann_id = msg.id if msg else None
+    logging.info(f"[PUBBLICAZIONE] Utente {username} ha pubblicato un annuncio. Presente nel gruppo: {presente}. ID annuncio: {ann_id}")
     return msg
 
 async def send_clean_message(client, user_id, chat_id, text, reply_markup=None):
@@ -174,10 +179,11 @@ async def is_user_allowed_by_username(client, user):
         async for member in client.get_chat_members(CHAT_ID):
             if member.user.username:
                 usernames.add(member.user.username.lower())
-        logging.info(f"Usernames nel gruppo: {usernames}")
-        if user.username and user.username.lower() in usernames:
-            return True
-        return False
+        # Log solo username utente e presenza
+        username = user.username if user.username else user.first_name
+        presente = user.username and user.username.lower() in usernames
+        logging.info(f"[START CHECK] Utente: {username} - Presente nel gruppo: {presente}")
+        return presente
     except Exception as e:
         logging.exception("Errore durante il controllo username nel gruppo")
         return False
@@ -185,7 +191,10 @@ async def is_user_allowed_by_username(client, user):
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message: Message):
     user = message.from_user
-    if not await is_user_allowed_by_username(client, user):
+    username = user.username if user.username else user.first_name
+    presente = await is_user_allowed_by_username(client, user)
+    logging.info(f"[START] Utente {username} ha avviato il bot. Presente nel gruppo: {presente}")
+    if not presente:
         await message.reply("❌  Solo gli utenti presenti nel gruppo possono usare il bot. Assicurati di avere un @username pubblico (nel tuo profilo) e di essere nel gruppo (https://t.me/TNet_Work).")
         return
     user_data[user.id] = {
@@ -509,23 +518,18 @@ async def topic_guardian_handler(client, message: Message):
 
     # Logica di controllo
     if topic_id is None:
-        logging.info("[TOPIC GUARDIAN] Messaggio ignorato: nessun topic_id.")
+        logging.info("[TOPIC GUARDIAN] Messaggio permesso: scritto nella chat generale (topic_id=None).")
         return
     if topic_id in FORBIDDEN_TOPIC_IDS:
         logging.info(f"[TOPIC GUARDIAN] Messaggio nel topic vietato: {topic_id}, eliminazione...")
         try:
             await client.delete_messages(message.chat.id, message.id)
-            await client.send_message(
-                message.chat.id,
-                "❌ Solo il bot può pubblicare in questo topic.",
-                reply_to_message_id=message.id
-            )
-            logging.info(f"[TOPIC GUARDIAN] Messaggio {message.id} eliminato e avviso inviato.")
+            logging.info(f"[TOPIC GUARDIAN] Messaggio {message.id} eliminato dal topic vietato {topic_id}.")
         except Exception as e:
-            logging.error(f"[TOPIC GUARDIAN] Errore eliminazione/invio: {e}")
+            logging.error(f"[TOPIC GUARDIAN] Errore eliminazione: {e}")
         return
     if topic_id == ALLOWED_TOPIC_ID:
-        logging.info(f"[TOPIC GUARDIAN] Messaggio nel topic consentito: {topic_id}")
+        logging.info(f"[TOPIC GUARDIAN] Messaggio permesso: scritto nel topic consentito ({topic_id}).")
         return
     # Messaggio in topic non gestito
     logging.info(f"[TOPIC GUARDIAN] Messaggio in topic non gestito: {topic_id}, nessuna azione.")
