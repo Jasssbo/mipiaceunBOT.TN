@@ -13,6 +13,10 @@ API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID =-1002461409137
+RESET = "\033[0m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+RED = "\033[91m"
 
 if not all([API_ID, API_HASH, BOT_TOKEN]):
     missing = [var for var in ["API_ID", "API_HASH", "BOT_TOKEN"] if not locals()[var]]
@@ -32,30 +36,33 @@ CATEGORY_QUESTIONS = {
         {"question": "💼 Inserisci il TITOLO LAVORATIVO che cerchi (es. Fonico):", "label": "💼 Titolo lavorativo richiesto:", "skippable": False},
         {"question": "📜 DESCRIVI LA MANSIONE e ciò di cui si dovrà occupare:", "label": "📜 Descrizione mansione:", "skippable": False},
         {"question": "📍 Inserisci il LUOGO in cui richiedi questa figura:", "label": "📍 Luogo del Lavoro:", "skippable": False},
-        {"question": "💰 Inserisci il COMPENSO:", "label": "💰 Compenso:", "skippable": True},
+        {"question": "💰 Inserisci il COMPENSO (opzionale):", "label": "💰 Compenso:", "skippable": True},
         {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
     ],
     "project": [
         {"question": "💡 Inserisci il TITOLO DEL PROGETTO:", "label": "💡 Titolo del Progetto:", "skippable": False},
         {"question": "📜 DESCRIVI IL TUO PROGETTO e spiega a quali ambiti è riferito:", "label": "📜 Descrizione del Progetto:", "skippable": False},
+        {"question": "🖼️ Inserisci la LOCANDINA del PROGETTO (opzionale):", "label": "🖼️ Locandina:", "skippable": True},
         {"question": "🔗 Inserisci un LINK (opzionale):", "label": "🔗 Link:", "skippable": True},
         {"question": "📌 Puoi CARICARE UN FILE (opzionale):", "label": "📌 File allegato:", "skippable": True},
         {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
     ],
     "event": [
         {"question": "🎫 Inserisci il NOME DELL'EVENTO:", "label": "🎫 Nome evento:", "skippable": False},
-        {"question": "📰 Inserisci il VOLANTINO / FLYER dell'EVENTO:", "label": "📰 Flyer:","skippable": True},
+        {"question": "📰 Inserisci il VOLANTINO / FLYER dell'EVENTO (opzionale):", "label": "📰 Flyer:","skippable": True},
         {"question": "📍 Inserisci il LUOGO:", "label": "📍 Luogo:", "skippable": False},
         {"question": "⏰ Inserisci la DATA E ORA:", "label": "⏰ Data e ora:", "skippable": False},
-        {"question": "💰 Inserisci il COSTO del BIGLIETTO:", "label": "💰 Costo biglietto:", "skippable": True},
+        {"question": "💰 Inserisci il COSTO del BIGLIETTO (opzionale):", "label": "💰 Costo biglietto:", "skippable": True},
         {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
     ],
     "profile": [
         {"question": "👤 Inserisci il tuo NOME E COGNOME:", "label": "👤 Nome e cognome:", "skippable": False},
         {"question": "💼 Inserisci la tua PROFESSIONE:", "label": "💼 Professione:", "skippable": False},
-        {"question": "📜 Breve descrizione delle competenze (max. 5 righe):", "label": "📜 Competenze:", "skippable": False},
-        {"question": "📎 Puoi allegare il file del TUO CURRICULUM (word o pdf):", "label": "📝 Curriculum:", "skippable": True},
-        {"question": "🔗 LINK al tuo Profilo LinkedIn:", "label": "🔗 Profilo LinkedIn:", "skippable": True},
+        {"question": "🖼️ Inserisci una tua FOTO:", "label": "🖼️ Foto:", "skippable": True},
+        {"question": "📝 Inserisci una tua breve BIOGRAFIA (opzionale):", "label": "📝 Biografia:", "skippable": True},
+        {"question": "📜 DESCRIVI brevemente le competenze (max. 5 righe):", "label": "📜 Competenze:", "skippable": False},
+        {"question": "📎 Puoi allegare il file del TUO CURRICULUM (opzionale):", "label": "📝 Curriculum:", "skippable": True},
+        {"question": "🔗 LINK al tuo Profilo LinkedIn (opzionale):", "label": "🔗 LinkedIn:", "skippable": True},
         {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
     ]
 }
@@ -194,6 +201,10 @@ async def start_handler(client, message: Message):
     username = user.username if user.username else user.first_name
     presente = await is_user_allowed_by_username(client, user)
     logging.info(f"[START] Utente {username} ha avviato il bot. Presente nel gruppo: {presente}")
+    if presente:
+        logging.info(f"{GREEN}[START] Utente {username} ha avviato il bot. Presente nel gruppo: {presente}{RESET}")
+    else:
+        logging.error(f"{RED}[START] Utente {username} ha avviato il bot. NON presente nel gruppo!{RESET}")
     if not presente:
         await message.reply("❌  Solo gli utenti presenti nel gruppo possono usare il bot. Assicurati di avere un @username pubblico (nel tuo profilo) e di essere nel gruppo (https://t.me/TNet_Work).")
         return
@@ -320,7 +331,7 @@ async def callback_handler(client, callback_query: CallbackQuery):
             buttons = InlineKeyboardMarkup([
                 [InlineKeyboardButton("📆 Evento", callback_data="new_event")],
                 [InlineKeyboardButton("💼 Annuncio di Lavoro", callback_data="new_job")],
-                [InlineKeyboardButton("💡 Call Pubblica per un Progetto", callback_data="new_project")],
+                [InlineKeyboardButton("💡 Un Tuo Progetto", callback_data="new_project")],
                 [InlineKeyboardButton("👤 Il Tuo Profilo Lavorativo", callback_data="new_profile")]
             ])
             await send_clean_message(client, user_id, user_id, "🏠 Sei tornato al menù principale. Cosa vuoi pubblicare nella Community?", buttons)
@@ -514,29 +525,28 @@ async def topic_guardian_handler(client, message: Message):
         except Exception:
             pass
 
-    logging.info(f"[TOPIC GUARDIAN] topic_id rilevato: {topic_id}")
+    logging.info(f"{GREEN}[TOPIC GUARDIAN] topic_id rilevato:{RESET} {topic_id}")
 
     # Logica di controllo
     if topic_id is None:
-        logging.info("[TOPIC GUARDIAN] Messaggio permesso: scritto nella chat generale (topic_id=None).")
-        return
-    if topic_id in FORBIDDEN_TOPIC_IDS:
-        logging.info(f"[TOPIC GUARDIAN] Messaggio nel topic vietato: {topic_id}, eliminazione...")
+        logging.info(f"{GREEN}[TOPIC GUARDIAN] Messaggio permesso: chat generale{RESET}")
+    elif topic_id in FORBIDDEN_TOPIC_IDS:
+        logging.error(f"{RED}[TOPIC GUARDIAN] Messaggio vietato nel topic {RESET} {topic_id}{YELLOW}, eliminazione...{RESET}")
         try:
             await client.delete_messages(message.chat.id, message.id)
-            logging.info(f"[TOPIC GUARDIAN] Messaggio {message.id} eliminato dal topic vietato {topic_id}.")
+            logging.info(f"{RED}[TOPIC GUARDIAN] Messaggio{RESET} {message.id} {RED}eliminato dal topic vietato {RESET}{topic_id}.")
         except Exception as e:
-            logging.error(f"[TOPIC GUARDIAN] Errore eliminazione: {e}")
+            logging.warning(f"{YELLOW}[WARNING] Errore di eliminazione del messaggio nel topic vietato:{RESET} {e}")
         return
-    if topic_id == ALLOWED_TOPIC_ID:
-        logging.info(f"[TOPIC GUARDIAN] Messaggio permesso: scritto nel topic consentito ({topic_id}).")
+    elif topic_id == ALLOWED_TOPIC_ID:
+        logging.info(f"{GREEN}[TOPIC GUARDIAN] Messaggio permesso: topic consentito{RESET} ({topic_id})")
         return
     # Messaggio in topic non gestito
-    logging.info(f"[TOPIC GUARDIAN] Messaggio in topic non gestito: {topic_id}, nessuna azione.")
+    logging.warning(f"{YELLOW}[TOPIC GUARDIAN] Messaggio in topic non gestito:{RESET} {topic_id}")
 
 # ------------------------ AVVIO BOT ------------------------
 
 if __name__ == "__main__":
-    logging.info("🤖 Avvio bot...")
+    logging.info("🤖{GREEN} Avvio bot...{RESET}")
     bot.run()
-    logging.info("🔚 Arresto bot...")
+    logging.info("🔚{RED} Arresto bot...{RESET}")
