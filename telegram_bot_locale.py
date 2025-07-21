@@ -483,11 +483,10 @@ async def topic_guardian_handler(client, message: Message):
     # Ignora i messaggi del bot
     if message.from_user and message.from_user.is_self:
         return
-    # Prendi l'ID del topic se esiste
-    topic_id = getattr(message, "message_thread_id", None)
-    # Se non è un messaggio in un topic, lascia passare
-    if topic_id is None:
+    # Se il messaggio NON è in un topic (forum), lascia passare
+    if not hasattr(message, "message_thread_id"):
         return
+    topic_id = message.message_thread_id
     # Se il messaggio è nel topic consentito, lascia passare
     if topic_id == ALLOWED_TOPIC_ID:
         return
