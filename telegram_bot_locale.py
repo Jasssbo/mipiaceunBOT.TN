@@ -480,28 +480,21 @@ FORBIDDEN_TOPIC_IDS = [10, 11, 12, 28]  # Sostituisci con gli ID dei topic dove 
 
 @bot.on_message(filters.group)
 async def topic_guardian_handler(client, message: Message):
+    logging.info(f"[TOPIC GUARDIAN] Handler eseguito per message.id={getattr(message, 'id', None)} in chat.id={getattr(message.chat, 'id', None)}")
     # Ignora i messaggi del bot
     if message.from_user and message.from_user.is_self:
+        logging.info("[TOPIC GUARDIAN] Messaggio del bot, ignorato.")
         return
-    import asyncio
-    # Delay per assicurarsi che il link sia generato
-    await asyncio.sleep(1)
-    try:
-        msg_link = await client.get_chat_message_link(message.chat.id, message.id)
-        logging.info(f"[TOPIC GUARDIAN] Link messaggio: {msg_link}")
-    except Exception as e:
-        logging.error(f"[TOPIC GUARDIAN] Errore nel recupero link: {e}")
-        msg_link = None
 
-    topic_id = None
-    if msg_link:
-        import re
-        match = re.search(r"/([0-9]+)/([0-9]+)$", msg_link)
-        if match:
-            topic_id = int(match.group(1))
-        logging.info(f"[TOPIC GUARDIAN] Estratto topic_id: {topic_id} da link: {msg_link}")
-    else:
-        logging.info("[TOPIC GUARDIAN] Nessun link messaggio disponibile.")
+    logging.debug(f"[TOPIC GUARDIAN] message: {message}")
+    topic_id = getattr(message, "message_thread_id", None)
+    logging.info(f"[TOPIC GUARDIAN] message_thread_id diretto: {topic_id}")
+    if topic_id is None and getattr(message, "reply_to_message", None):
+        topic_id = getattr(message.reply_to_message, "message_thread_id", None)
+        logging.info(f"[TOPIC GUARDIAN] message_thread_id da reply: {topic_id}")
+
+    logging.info(f"[TOPIC GUARDIAN] topic_id finale rilevato: {topic_id}")
+
     # Se non c'è topic_id, lascia passare
     if topic_id is None:
         logging.info(f"[TOPIC GUARDIAN] Messaggio ignorato: nessun topic_id.")
@@ -515,13 +508,17 @@ async def topic_guardian_handler(client, message: Message):
         logging.info(f"[TOPIC GUARDIAN] Messaggio nel topic vietato: {topic_id}, eliminazione...")
         try:
             await client.delete_messages(message.chat.id, message.id)
+            logging.info(f"[TOPIC GUARDIAN] Messaggio {message.id} eliminato da topic {topic_id}.")
             await client.send_message(
                 message.chat.id,
                 "❌ Solo il bot può pubblicare in questo topic.",
                 reply_to_message_id=message.id
             )
+            logging.info(f"[TOPIC GUARDIAN] Messaggio di avviso inviato per topic vietato {topic_id}.")
         except Exception as e:
             logging.error(f"[TOPIC GUARDIAN] Errore eliminazione/invio: {e}")
+    else:
+        logging.info(f"[TOPIC GUARDIAN] Messaggio in topic non gestito: {topic_id}, nessuna azione.")
 
 # ------------------------ AVVIO BOT ------------------------
 
