@@ -486,12 +486,31 @@ async def topic_guardian_handler(client, message: Message):
         logging.info("[TOPIC GUARDIAN] Messaggio del bot, ignorato.")
         return
 
+    # Log completo degli attributi del messaggio
+    try:
+        logging.info(f"[TOPIC GUARDIAN] message.__dict__: {message.__dict__}")
+    except Exception as e:
+        logging.warning(f"[TOPIC GUARDIAN] Impossibile loggare __dict__: {e}")
     logging.debug(f"[TOPIC GUARDIAN] message: {message}")
     topic_id = getattr(message, "message_thread_id", None)
     logging.info(f"[TOPIC GUARDIAN] message_thread_id diretto: {topic_id}")
     if topic_id is None and getattr(message, "reply_to_message", None):
         topic_id = getattr(message.reply_to_message, "message_thread_id", None)
         logging.info(f"[TOPIC GUARDIAN] message_thread_id da reply: {topic_id}")
+
+    # Se ancora None, prova a estrarre dal link pubblico (se disponibile)
+    if topic_id is None:
+        try:
+            if hasattr(client, "get_chat_message_link"):
+                msg_link = await client.get_chat_message_link(message.chat.id, message.id)
+                logging.info(f"[TOPIC GUARDIAN] Link messaggio: {msg_link}")
+                import re
+                match = re.search(r"/([0-9]+)/([0-9]+)$", msg_link)
+                if match:
+                    topic_id = int(match.group(1))
+                    logging.info(f"[TOPIC GUARDIAN] topic_id estratto da link: {topic_id}")
+        except Exception as e:
+            logging.warning(f"[TOPIC GUARDIAN] Errore estrazione topic_id da link: {e}")
 
     logging.info(f"[TOPIC GUARDIAN] topic_id finale rilevato: {topic_id}")
 
