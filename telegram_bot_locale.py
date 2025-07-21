@@ -483,28 +483,36 @@ async def topic_guardian_handler(client, message: Message):
     # Ignora i messaggi del bot
     if message.from_user and message.from_user.is_self:
         return
-    # Ottieni il link pubblico del messaggio
+    import asyncio
+    # Delay per assicurarsi che il link sia generato
+    await asyncio.sleep(1)
     try:
         msg_link = await client.get_chat_message_link(message.chat.id, message.id)
-    except Exception:
+        logging.info(f"[TOPIC GUARDIAN] Link messaggio: {msg_link}")
+    except Exception as e:
+        logging.error(f"[TOPIC GUARDIAN] Errore nel recupero link: {e}")
         msg_link = None
 
     topic_id = None
     if msg_link:
-        # Il link è del tipo https://t.me/<groupname>/<topic_id>/<message_id>
-        # Se non c'è topic_id, il messaggio è nella chat principale
         import re
         match = re.search(r"/([0-9]+)/([0-9]+)$", msg_link)
         if match:
             topic_id = int(match.group(1))
+        logging.info(f"[TOPIC GUARDIAN] Estratto topic_id: {topic_id} da link: {msg_link}")
+    else:
+        logging.info("[TOPIC GUARDIAN] Nessun link messaggio disponibile.")
     # Se non c'è topic_id, lascia passare
     if topic_id is None:
+        logging.info(f"[TOPIC GUARDIAN] Messaggio ignorato: nessun topic_id.")
         return
     # Se il messaggio è nel topic consentito, lascia passare
     if topic_id == ALLOWED_TOPIC_ID:
+        logging.info(f"[TOPIC GUARDIAN] Messaggio nel topic consentito: {topic_id}")
         return
     # Se il messaggio è in uno dei topic vietati
     if topic_id in FORBIDDEN_TOPIC_IDS:
+        logging.info(f"[TOPIC GUARDIAN] Messaggio nel topic vietato: {topic_id}, eliminazione...")
         try:
             await client.delete_messages(message.chat.id, message.id)
             await client.send_message(
@@ -512,8 +520,8 @@ async def topic_guardian_handler(client, message: Message):
                 "❌ Solo il bot può pubblicare in questo topic.",
                 reply_to_message_id=message.id
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logging.error(f"[TOPIC GUARDIAN] Errore eliminazione/invio: {e}")
 
 # ------------------------ AVVIO BOT ------------------------
 
