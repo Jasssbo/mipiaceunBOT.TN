@@ -483,11 +483,16 @@ async def topic_guardian_handler(client, message: Message):
     # Ignora i messaggi del bot
     if message.from_user and message.from_user.is_self:
         return
+    # Prendi l'ID del topic se esiste
+    topic_id = getattr(message, "message_thread_id", None)
+    # Se non è un messaggio in un topic, lascia passare
+    if topic_id is None:
+        return
     # Se il messaggio è nel topic consentito, lascia passare
-    if message.message_thread_id == ALLOWED_TOPIC_ID:
+    if topic_id == ALLOWED_TOPIC_ID:
         return
     # Se il messaggio è in uno dei topic vietati
-    if message.message_thread_id in FORBIDDEN_TOPIC_IDS:
+    if topic_id in FORBIDDEN_TOPIC_IDS:
         try:
             await client.delete_messages(message.chat.id, message.id)
             await client.send_message(
