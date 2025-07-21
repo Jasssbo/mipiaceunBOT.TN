@@ -483,10 +483,23 @@ async def topic_guardian_handler(client, message: Message):
     # Ignora i messaggi del bot
     if message.from_user and message.from_user.is_self:
         return
-    # Se il messaggio NON è in un topic (forum), lascia passare
-    if not hasattr(message, "message_thread_id"):
+    # Ottieni il link pubblico del messaggio
+    try:
+        msg_link = await client.get_chat_message_link(message.chat.id, message.id)
+    except Exception:
+        msg_link = None
+
+    topic_id = None
+    if msg_link:
+        # Il link è del tipo https://t.me/<groupname>/<topic_id>/<message_id>
+        # Se non c'è topic_id, il messaggio è nella chat principale
+        import re
+        match = re.search(r"/([0-9]+)/([0-9]+)$", msg_link)
+        if match:
+            topic_id = int(match.group(1))
+    # Se non c'è topic_id, lascia passare
+    if topic_id is None:
         return
-    topic_id = message.message_thread_id
     # Se il messaggio è nel topic consentito, lascia passare
     if topic_id == ALLOWED_TOPIC_ID:
         return
