@@ -1,3 +1,8 @@
+"""
+Bot Telegram per la gestione di annunci, progetti, eventi e profili lavorativi.
+Gestisce topic, pubblicazione, eliminazione e interazione utente con logging colorato.
+"""
+
 import os
 import sys
 import logging
@@ -7,66 +12,71 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, 
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 # ------------------------ CONFIGURAZIONE ------------------------
-
-load_dotenv("bot_infos.env")
-API_ID = os.getenv("API_ID")
-API_HASH = os.getenv("API_HASH")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID =-1002461409137
+# --- Costanti ANSI per colorare i log in base alla gravità ---
 RESET = "\033[0m"
 GREEN = "\033[92m"
 YELLOW = "\033[93m"
 RED = "\033[91m"
 
+# --- Caricamento variabili ambiente e controllo presenza ---
+load_dotenv("bot_infos.env")
+API_ID = os.getenv("API_ID")
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID =-1002461409137
+# Se mancano variabili obbligatorie, il bot si arresta
 if not all([API_ID, API_HASH, BOT_TOKEN]):
     missing = [var for var in ["API_ID", "API_HASH", "BOT_TOKEN"] if not locals()[var]]
     logging.critical(f"Missing required .env variables: {', '.join(missing)}")
     sys.exit(1)
-
+    
+# --- Configurazione logging: formato e livello ---
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
-
+# --- Istanza del client Pyrogram ---
 bot = Client("job_board_bot", api_id=int(API_ID), api_hash=API_HASH, bot_token=BOT_TOKEN)
 
+# --- Dizionario delle domande per ogni categoria di annuncio ---
 CATEGORY_QUESTIONS = {
     "job": [
-        {"question": "💼 Inserisci il TITOLO LAVORATIVO che cerchi (es. Fonico):", "label": "💼 Titolo lavorativo richiesto:", "skippable": False},
+        {"question": "💼 Scrivi qui il TITOLO LAVORATIVO che cerchi (es. Fonico):", "label": "💼 Titolo lavorativo richiesto:", "skippable": False},
         {"question": "📜 DESCRIVI LA MANSIONE e ciò di cui si dovrà occupare:", "label": "📜 Descrizione mansione:", "skippable": False},
-        {"question": "📍 Inserisci il LUOGO in cui richiedi questa figura:", "label": "📍 Luogo del Lavoro:", "skippable": False},
-        {"question": "💰 Inserisci il COMPENSO (opzionale):", "label": "💰 Compenso:", "skippable": True},
-        {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
+        {"question": "📍 Scrivi qui il LUOGO in cui richiedi questa figura:", "label": "📍 Luogo del Lavoro:", "skippable": False},
+        {"question": "💰 Scrivi qui il COMPENSO (opzionale):", "label": "💰 Compenso:", "skippable": True},
+        {"question": "📞 Scrivi qui i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
     ],
     "project": [
-        {"question": "💡 Inserisci il TITOLO DEL PROGETTO:", "label": "💡 Titolo del Progetto:", "skippable": False},
+        {"question": "💡 Scrivi qui il TITOLO DEL PROGETTO:", "label": "💡 Titolo del Progetto:", "skippable": False},
         {"question": "📜 DESCRIVI IL TUO PROGETTO e spiega a quali ambiti è riferito:", "label": "📜 Descrizione del Progetto:", "skippable": False},
-        {"question": "🖼️ Inserisci la LOCANDINA del PROGETTO (opzionale):", "label": "🖼️ Locandina:", "skippable": True},
-        {"question": "🔗 Inserisci un LINK (opzionale):", "label": "🔗 Link:", "skippable": True},
+        {"question": "🖼️ Scrivi qui la LOCANDINA del PROGETTO (opzionale):", "label": "🖼️ Locandina:", "skippable": True},
+        {"question": "🔗 Scrivi qui un LINK (opzionale):", "label": "🔗 Link:", "skippable": True},
         {"question": "📌 Puoi CARICARE UN FILE (opzionale):", "label": "📌 File allegato:", "skippable": True},
-        {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
+        {"question": "📞 Scrivi qui i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
     ],
     "event": [
-        {"question": "🎫 Inserisci il NOME DELL'EVENTO:", "label": "🎫 Nome evento:", "skippable": False},
-        {"question": "📰 Inserisci il VOLANTINO / FLYER dell'EVENTO (opzionale):", "label": "📰 Flyer:","skippable": True},
-        {"question": "📍 Inserisci il LUOGO:", "label": "📍 Luogo:", "skippable": False},
-        {"question": "⏰ Inserisci la DATA E ORA:", "label": "⏰ Data e ora:", "skippable": False},
-        {"question": "💰 Inserisci il COSTO del BIGLIETTO (opzionale):", "label": "💰 Costo biglietto:", "skippable": True},
-        {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
+        {"question": "🎫 Scrivi qui il NOME DELL'EVENTO:", "label": "🎫 Nome evento:", "skippable": False},
+        {"question": "📰 Inviami il VOLANTINO / FLYER dell'EVENTO (opzionale):", "label": "📰 Flyer:","skippable": True},
+        {"question": "📍 Scrivi qui il LUOGO:", "label": "📍 Luogo:", "skippable": False},
+        {"question": "⏰ Scrivi qui la DATA E l'ORA dell'evento:", "label": "⏰ Data e ora:", "skippable": False},
+        {"question": "💰 Scrivi qui il COSTO del BIGLIETTO (opzionale):", "label": "💰 Costo biglietto:", "skippable": True},
+        {"question": "📞 Scrivi qui i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
     ],
     "profile": [
-        {"question": "👤 Inserisci il tuo NOME E COGNOME:", "label": "👤 Nome e cognome:", "skippable": False},
-        {"question": "💼 Inserisci la tua PROFESSIONE:", "label": "💼 Professione:", "skippable": False},
-        {"question": "🖼️ Inserisci una tua FOTO:", "label": "🖼️ Foto:", "skippable": True},
-        {"question": "📝 Inserisci una tua breve BIOGRAFIA (opzionale):", "label": "📝 Biografia:", "skippable": True},
+        {"question": "👤 Scrivi qui il tuo NOME E COGNOME:", "label": "👤 Nome e cognome:", "skippable": False},
+        {"question": "💼 Scrivi qui la tua PROFESSIONE:", "label": "💼 Professione:", "skippable": False},
+        {"question": "🖼️ Carica una tua FOTO:", "label": "🖼️ Foto:", "skippable": True},
+        {"question": "📝 Scrivi una tua breve BIOGRAFIA (opzionale):", "label": "📝 Bio.:", "skippable": True},
         {"question": "📜 DESCRIVI brevemente le competenze (max. 5 righe):", "label": "📜 Competenze:", "skippable": False},
         {"question": "📎 Puoi allegare il file del TUO CURRICULUM (opzionale):", "label": "📝 Curriculum:", "skippable": True},
         {"question": "🔗 LINK al tuo Profilo LinkedIn (opzionale):", "label": "🔗 LinkedIn:", "skippable": True},
-        {"question": "📞 Inserisci i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
+        {"question": "📞 Scrivi qui i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
     ]
 }
 
+# --- Messaggi di puntamento per la pubblicazione degli annunci nei Topic (reply_to_message_id) ---
 POINTER_MESSAGE_IDS = {
     "job": 466,
     "project": 467,
@@ -74,12 +84,14 @@ POINTER_MESSAGE_IDS = {
     "profile": 468
 }
 
+# --- Dizionario per gestire lo stato e i dati di ogni utente ---
 user_data = {}
 
-# Definisci gli ID dei topic consentiti e NON consentiti
-ALLOWED_TOPIC_IDS = [1]  # Sostituisci con gli ID dei topic dove SOLO il bot può pubblicare
-NOT_ALLOWED_TOPIC_IDS = [10, 11, 12, 28]  # Sostituisci con gli ID dei topic dove NESSUNO può pubblicare
+# Definisci gli ID dei topic consentiti e NON consentiti per l'invio di messaggi
+ALLOWED_TOPIC_IDS = [1]  # Sostituisci con gli ID dei topic dove gli utenti possono scrivere liberamente
+NOT_ALLOWED_TOPIC_IDS = [10, 11, 12, 28]  # Sostituisci con gli ID dei topic dove SOLO il bot può pubblicare
 
+# --- Funzione per eliminare messaggi in modo sicuro ---
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=4, max=60),
        retry=retry_if_exception_type((errors.FloodWait, errors.RPCError)))
 async def safe_delete(client, chat_id, message_id):
@@ -88,6 +100,7 @@ async def safe_delete(client, chat_id, message_id):
     except errors.MessageDeleteForbidden:
         pass
 
+# --- Funzione per costruire il testo dell'annuncio ---
 def build_announcement_text(info, user, show_id=None):
     cat = info["category"]
     if cat == "job":
@@ -110,7 +123,14 @@ def build_announcement_text(info, user, show_id=None):
             text += f"{label}\n{a}\n\n"
     return text
 
+    
+# --- Funzione per inviare la preview dell'annuncio ---
 async def send_preview(client, user_id, info):
+    """
+    Invia all'utente una preview privata dell'annuncio che sta compilando.
+    Se è presente un file (foto/documento), lo allega come media.
+    Restituisce l'ID del messaggio preview inviato.
+    """
     user = await client.get_users(user_id)
     text = build_announcement_text(info, user)
     file_id = info.get("file")
@@ -124,7 +144,12 @@ async def send_preview(client, user_id, info):
         msg = await client.send_message(user_id, text)
     return msg.id
 
+# --- Funzione per aggiornare la preview dell'annuncio con l'ID assegnato ---
 async def update_preview_with_id(client, user_id, preview_id, info, ann_id):
+    """
+    Aggiorna la preview privata dell'annuncio con l'ID assegnato dopo la pubblicazione.
+    Modifica il testo/caption del messaggio preview per mostrare l'ID annuncio.
+    """
     user = await client.get_users(user_id)
     text = build_announcement_text(info, user, show_id=ann_id)
     file_id = info.get("file")
@@ -137,7 +162,13 @@ async def update_preview_with_id(client, user_id, preview_id, info, ann_id):
     except Exception as e:
         logging.warning("Impossibile aggiornare la preview con l'ID annuncio.")
 
+# --- Funzione per pubblicare l'annuncio ---
 async def publish_announcement(client, user_id, info):
+    """
+    Pubblica l'annuncio compilato dall'utente nel gruppo pubblico.
+    Se presente, allega file/media. Usa il messaggio di puntamento corretto per la categoria.
+    Logga l'operazione e restituisce il messaggio pubblicato.
+    """
     user = await client.get_users(user_id)
     text = build_announcement_text(info, user, show_id=None)  # MAI mostrare l'ID nell'annuncio pubblico
     file_id = info.get("file")
@@ -157,7 +188,12 @@ async def publish_announcement(client, user_id, info):
     logging.info(f"[PUBBLICAZIONE] Utente {username} ha pubblicato un annuncio. Presente nel gruppo: {presente}. ID annuncio: {ann_id}")
     return msg
 
+# --- Funzione per inviare un messaggio pulito all'utente ---
 async def send_clean_message(client, user_id, chat_id, text, reply_markup=None):
+    """
+    Invia un nuovo messaggio all'utente, eliminando prima tutti i messaggi precedenti del bot per quell'utente.
+    Aggiorna lo stato utente per tracciare l'ultimo messaggio inviato e quelli da eliminare.
+    """
     # Elimina TUTTI i messaggi precedenti del bot per quell'utente
     for mid in user_data.get(user_id, {}).get("messages_to_delete", []):
         await safe_delete(client, chat_id, mid)
@@ -173,6 +209,10 @@ async def send_clean_message(client, user_id, chat_id, text, reply_markup=None):
 # ------------------------ HANDLER /start ------------------------
 
 async def is_user_allowed(client, user_id):
+    """
+    Controlla se l'utente è membro effettivo del gruppo Telegram.
+    Restituisce True solo se lo status è member, administrator o creator.
+    """
     try:
         member = await client.get_chat_member(CHAT_ID, user_id)
         # Puoi raffinare il controllo se vuoi solo membri effettivi (non banned/kicked)
@@ -181,6 +221,11 @@ async def is_user_allowed(client, user_id):
         return False
 
 async def is_user_allowed_by_username(client, user):
+    """
+    Controlla se l'utente (tramite username) è presente tra i membri del gruppo.
+    Utile per gestire utenti con username pubblico e verificare la presenza reale.
+    Logga il tentativo di interazione.
+    """
     try:
         usernames = set()
         async for member in client.get_chat_members(CHAT_ID):
@@ -189,22 +234,23 @@ async def is_user_allowed_by_username(client, user):
         # Log solo username utente e presenza
         username = user.username if user.username else user.first_name
         presente = user.username and user.username.lower() in usernames
-        logging.info(f"[START CHECK] Utente: {username} - Presente nel gruppo: {presente}")
+        logging.info(f"[START CHECK] Utente: {username} - Presente nel gruppo: {presente} sta provando ad interagire.")
         return presente
     except Exception as e:
         logging.exception("Errore durante il controllo username nel gruppo")
         return False
 
+# --- Handler per comando /start: verifica presenza utente nel gruppo e mostra menù principale ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message: Message):
+    logging.debug(f"[HANDLER] collect_data_handler attivato per utente {user.username if user.username else user.first_name} (ID: {user.id})")
     user = message.from_user
     username = user.username if user.username else user.first_name
     presente = await is_user_allowed_by_username(client, user)
-    logging.info(f"[START] Utente {username} ha avviato il bot. Presente nel gruppo: {presente}")
     if presente:
-        logging.info(f"{GREEN}[START] Utente {username} ha avviato il bot. Presente nel gruppo: {presente}{RESET}")
+        logging.info(f"{GREEN}[START] Utente {RESET}{username}{GREEN} ha avviato il bot. Presente nel gruppo: {presente}{RESET}")
     else:
-        logging.error(f"{RED}[START] Utente {username} ha avviato il bot. NON presente nel gruppo!{RESET}")
+        logging.warning(f"{YELLOW}[START] Utente {RESET}{username}{YELLOW} ha avviato il bot. NON presente nel gruppo!{RESET}")
     if not presente:
         await message.reply("❌  Solo gli utenti presenti nel gruppo possono usare il bot. Assicurati di avere un @username pubblico (nel tuo profilo) e di essere nel gruppo (https://t.me/TNet_Work).")
         return
@@ -229,10 +275,11 @@ async def start_handler(client, message: Message):
     await send_clean_message(client, user.id, message.chat.id, "Benvenuto! Cosa vuoi pubblicare all'interno della Community?", buttons)
 
 # ------------------------ RACCOLTA DATI UTENTE ------------------------
-
+# --- Handler per la raccolta dati utente: gestisce domande, risposte e preview ---
 @bot.on_message(filters.private & ~filters.command("start"))
 async def collect_data_handler(client, message: Message):
     user = message.from_user
+    logging.debug(f"[INPUT] Ricevuto messaggio da {user.username if user.username else user.first_name}: {getattr(message, 'text', None) or '[media]'}")
     if user.id not in user_data:
         user_data[user.id] = {"user_messages_to_delete": []}
     if "user_messages_to_delete" not in user_data[user.id]:
@@ -248,6 +295,7 @@ async def collect_data_handler(client, message: Message):
         question_data = CATEGORY_QUESTIONS[cat][step]
         question_text = question_data["question"]
         label_text = question_data["label"]
+        logging.info(f"{GREEN}[STEP] Utente {user.username if user.username else user.first_name} avanzato allo step {step} della categoria {cat}{RESET}")
         if message.photo or message.document:
             info["answers"][label_text] = "📎 File allegato."
             info["file"] = message.photo.file_id if message.photo else message.document.file_id
@@ -262,16 +310,21 @@ async def collect_data_handler(client, message: Message):
             last_bot_msg = info["messages_to_delete"].pop()
             try:
                 await client.delete_messages(user.id, last_bot_msg)
+                logging.info(f"{RED}[DELETE] Eliminato messaggio {last_bot_msg} per utente {user.username if user.username else user.first_name}{RESET}")
             except Exception:
+                logging.warning(f"{YELLOW}[DELETE] Errore eliminazione messaggio {last_bot_msg} per utente {user.username if user.username else user.first_name}{RESET}")
                 pass
         # Elimina la risposta dell'utente
         for mid in user_data[user.id].get("user_messages_to_delete", []):
             try:
                 await client.delete_messages(user.id, mid)
+                logging.info(f"{RED}[DELETE] Eliminato messaggio utente {mid} per utente {user.username if user.username else user.first_name}{RESET}")
             except Exception:
+                logging.warning(f"{YELLOW}[DELETE] Errore eliminazione messaggio utente {mid} per utente {user.username if user.username else user.first_name}{RESET}")
                 pass
         user_data[user.id]["user_messages_to_delete"].clear()
         info["step"] += 1
+        logging.info(f"[STEP] Utente {user.username if user.username else user.first_name} avanzato allo step {info['step']} della categoria {cat}")
         if info["step"] < len(CATEGORY_QUESTIONS[cat]):
             question_data = CATEGORY_QUESTIONS[cat][info["step"]]
             buttons = [
@@ -281,6 +334,7 @@ async def collect_data_handler(client, message: Message):
                 buttons.insert(0, [InlineKeyboardButton("⏭️ Salta questa domanda", callback_data="skip_question")])
             buttons.append([InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")])
             sent = await client.send_message(user.id, question_data["question"], reply_markup=InlineKeyboardMarkup(buttons))
+            logging.info(f"[SEND] Inviata domanda step {info['step']} a utente {user.username if user.username else user.first_name} (ID: {sent.id})")
             # Salva l'ID della domanda del bot
             if "messages_to_delete" not in info:
                 info["messages_to_delete"] = []
@@ -288,6 +342,7 @@ async def collect_data_handler(client, message: Message):
         else:
             # Preview privata SENZA ID
             preview_id = await send_preview(client, user.id, info)
+            logging.info(f"[SEND] Inviata preview a utente {user.username if user.username else user.first_name} (ID: {preview_id})")
             user_data[user.id]["preview_msg_id"] = preview_id
             confirm_btns = InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ Conferma", callback_data=f"confirm_{user.id}")],
@@ -295,18 +350,31 @@ async def collect_data_handler(client, message: Message):
                 [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
             ])
             confirm_msg = await client.send_message(user.id, "✅ Confermi di voler pubblicare questo annuncio?", reply_markup=confirm_btns)
+            logging.info(f"[SEND] Inviato messaggio di conferma pubblicazione a utente {user.username if user.username else user.first_name} (ID: {confirm_msg.id})")
             user_data[user.id]["confirm_msg_id"] = confirm_msg.id
     except Exception as e:
-        logging.exception("Errore nella raccolta dati")
+        logging.warning(f"{YELLOW}[ERROR] Eccezione in collect_data_handler per utente {user.username if user.username else user.first_name}: {e}{RESET}")
 
 
 # ------------------------ HANDLER CALLBACK ------------------------
-
+# --- Handler per la gestione dei bottoni InlineKeyboard: gestisce menù, conferme, annullamenti, eliminazioni ---
 @bot.on_callback_query()
 async def callback_handler(client, callback_query: CallbackQuery):
+    """
+    Gestisce tutte le interazioni con i bottoni InlineKeyboard:
+    - Avvio nuova compilazione annuncio
+    - Navigazione tra domande
+    - Conferma/annullamento pubblicazione
+    - Eliminazione annuncio
+    - Ritorno al menù principale
+    Ogni blocco gestisce un tipo di callback specifico.
+    """
+    logging.debug(f"[HANDLER] callback_handler attivato per utente {callback_query.from_user.username if callback_query.from_user.username else callback_query.from_user.first_name} (ID: {callback_query.from_user.id})")
     data = callback_query.data
     user_id = callback_query.from_user.id
+    logging.debug(f"[CALLBACK] Utente {callback_query.from_user.username if callback_query.from_user.username else callback_query.from_user.first_name} ha premuto il bottone: {data}")
     try:
+        # --- Avvio nuova compilazione annuncio ---
         if data.startswith("new_"):
             cat = data.replace("new_", "")
             user_data[user_id].update({"category": cat, "step": 0, "answers": {}, "file": None, "file_type": None})
@@ -319,7 +387,10 @@ async def callback_handler(client, callback_query: CallbackQuery):
                     [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
                 ])
             )
+       
+        # --- Ritorno al menù principale ---
         elif data == "back_to_menu":
+            logging.info(f"[MENU] Utente {user.username if user.username else user.first_name} è tornato al menù principale")
             user = await client.get_users(user_id)
             if not await is_user_allowed_by_username(client, user):
                 await client.send_message(user_id, "❌ Solo gli utenti presenti nel gruppo possono pubblicare. Assicurati di avere un @username pubblico (nel tuo profilo) e di essere nel gruppo (https://t.me/TNet_Work).")
@@ -335,7 +406,10 @@ async def callback_handler(client, callback_query: CallbackQuery):
                 [InlineKeyboardButton("👤 Il Tuo Profilo Lavorativo", callback_data="new_profile")]
             ])
             await send_clean_message(client, user_id, user_id, "🏠 Sei tornato al menù principale. Cosa vuoi pubblicare nella Community?", buttons)
+       
+        # --- Conferma pubblicazione annuncio ---
         elif data.startswith("confirm_"):
+            logging.info(f"{GREEN}[PUBBLICAZIONE] Utente {user.username if user.username else user.first_name} ha confermato la pubblicazione dell'annuncio{RESET}")
             uid = int(data.split("_")[1])
             user = await client.get_users(uid)
             if not await is_user_allowed_by_username(client, user):
@@ -359,7 +433,10 @@ async def callback_handler(client, callback_query: CallbackQuery):
                 ])
                 confirm_msg = await client.send_message(uid, conferma, reply_markup=menu_btn)
                 user_data[uid]["confirm_msg_id"] = confirm_msg.id
+      
+        # --- Annullamento pubblicazione annuncio ---
         elif data.startswith("cancel_"):
+            logging.info(f"{RED}[ANNUNCIO] Utente {user.username if user.username else user.first_name} ha annullato la pubblicazione dell'annuncio{RESET}")
             uid = int(data.split("_")[1])
             user = await client.get_users(uid)
             if not await is_user_allowed_by_username(client, user):
@@ -381,7 +458,10 @@ async def callback_handler(client, callback_query: CallbackQuery):
                 [InlineKeyboardButton("👤 Il Tuo Profilo Lavorativo", callback_data="new_profile")]
             ])
             await send_clean_message(client, uid, uid, "❌ Annuncio annullato. Sei tornato al menù principale.", buttons)
+       
+        # --- Eliminazione annuncio tramite bottone ---
         elif data.startswith("delete_"):
+            logging.info(f"{RED}[ANNUNCIO] Utente {user.username if user.username else user.first_name} ha richiesto l'eliminazione dell'annuncio ID {ann_id}{RESET}")
             try:
                 parts = data.split("_")
                 ann_id = int(parts[1])
@@ -410,6 +490,7 @@ async def callback_handler(client, callback_query: CallbackQuery):
                 logging.exception("Errore eliminazione bottone")
                 await callback_query.answer("❌ Errore durante l'eliminazione.", show_alert=True)
 
+        # --- Torna alla domanda precedente ---
         elif data == "back_to_question":
             info = user_data[user_id]
             if info["step"] > 0:
@@ -435,6 +516,7 @@ async def callback_handler(client, callback_query: CallbackQuery):
                     InlineKeyboardMarkup(buttons)
                 )
 
+        # --- Salta la domanda corrente ---
         elif data == "skip_question":
             info = user_data[user_id]
             cat = info["category"]
@@ -464,11 +546,11 @@ async def callback_handler(client, callback_query: CallbackQuery):
                 user_data[user_id]["confirm_msg_id"] = confirm_msg.id
 
     except Exception as e:
-        logging.exception("Errore nel callback handler")
+        logging.warning(f"{YELLOW}[ERROR] Eccezione in callback_handler per utente {callback_query.from_user.username if callback_query.from_user.username else callback_query.from_user.first_name}: {e}{RESET}")
         await send_clean_message(client, user_id, user_id, f"❌ Errore: {str(e)}")
 
 # ------------------------ ELIMINAZIONE ANNUNCIO DA COMANDO ------------------------
-
+# --- Handler per comando /elimina: permette all'autore di eliminare il proprio annuncio tramite ID ---
 @bot.on_message(filters.command("elimina") & filters.private)
 async def elimina_annuncio_handler(client, message: Message):
     user = message.from_user
@@ -494,7 +576,7 @@ async def elimina_annuncio_handler(client, message: Message):
         await message.reply("❌ Errore durante l'eliminazione dell'annuncio.")
 
 # ------------------------ TOPIC GUARDIAN ------------------------
-
+# --- Handler per controllo e moderazione dei topic: elimina messaggi non consentiti nei topic vietati ---
 ALLOWED_TOPIC_ID = 1  # Sostituisci con l'ID del topic dove gli utenti possono scrivere liberamente
 FORBIDDEN_TOPIC_IDS = [10, 11, 12, 28]  # Sostituisci con gli ID dei topic dove solo il bot può pubblicare
 
@@ -524,14 +606,13 @@ async def topic_guardian_handler(client, message: Message):
                         topic_id = int(match.group(1))
         except Exception:
             pass
-
     logging.info(f"{GREEN}[TOPIC GUARDIAN] topic_id rilevato:{RESET} {topic_id}")
 
     # Logica di controllo
     if topic_id is None:
         logging.info(f"{GREEN}[TOPIC GUARDIAN] Messaggio permesso: chat generale{RESET}")
     elif topic_id in FORBIDDEN_TOPIC_IDS:
-        logging.error(f"{RED}[TOPIC GUARDIAN] Messaggio vietato nel topic {RESET} {topic_id}{YELLOW}, eliminazione...{RESET}")
+        logging.warning(f"{YELLOW}[TOPIC GUARDIAN] Messaggio vietato nel topic {RESET} {topic_id}{YELLOW}, eliminazione...{RESET}")
         try:
             await client.delete_messages(message.chat.id, message.id)
             logging.info(f"{RED}[TOPIC GUARDIAN] Messaggio{RESET} {message.id} {RED}eliminato dal topic vietato {RESET}{topic_id}.")
@@ -544,8 +625,8 @@ async def topic_guardian_handler(client, message: Message):
     # Messaggio in topic non gestito
     logging.warning(f"{YELLOW}[TOPIC GUARDIAN] Messaggio in topic non gestito:{RESET} {topic_id}")
 
-# ------------------------ AVVIO BOT ------------------------
-
+# ------------------------ AVVIO e ARRESTO BOT ------------------------
+# --- Avvio e arresto del bot Telegram ---
 if __name__ == "__main__":
     logging.info("🤖{GREEN} Avvio bot...{RESET}")
     bot.run()
