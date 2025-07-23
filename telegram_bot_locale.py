@@ -390,8 +390,8 @@ async def callback_handler(client, callback_query: CallbackQuery):
        
         # --- Ritorno al menù principale ---
         elif data == "back_to_menu":
+            user = await client.get_users(user_id)  # Inizializza la variabile user
             logging.info(f"[MENU] Utente {user.username if user.username else user.first_name} è tornato al menù principale")
-            user = await client.get_users(user_id)
             if not await is_user_allowed_by_username(client, user):
                 await client.send_message(user_id, "❌ Solo gli utenti presenti nel gruppo possono pubblicare. Assicurati di avere un @username pubblico (nel tuo profilo) e di essere nel gruppo (https://t.me/TNet_Work).")
                 return
