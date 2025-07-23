@@ -243,8 +243,8 @@ async def is_user_allowed_by_username(client, user):
 # --- Handler per comando /start: verifica presenza utente nel gruppo e mostra menù principale ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message: Message):
-    logging.debug(f"[HANDLER] collect_data_handler attivato per utente {user.username if user.username else user.first_name} (ID: {user.id})")
     user = message.from_user
+    logging.debug(f"[HANDLER] collect_data_handler attivato per utente {user.username if user.username else user.first_name} (ID: {user.id})")
     username = user.username if user.username else user.first_name
     presente = await is_user_allowed_by_username(client, user)
     if presente:
