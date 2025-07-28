@@ -6,6 +6,9 @@ import logging
 import sys
 import os
 from dotenv import load_dotenv
+import sys
+from pyrogram import Client
+
 
 # Caricamento variabili ambiente
 load_dotenv("bot_infos.env")
@@ -18,7 +21,12 @@ if not all([API_ID, API_HASH, BOT_TOKEN]):
     missing = [var for var in ["API_ID", "API_HASH", "BOT_TOKEN"] if not locals()[var]]
     logging.critical(f"Missing required .env variables: {', '.join(missing)}")
     sys.exit(1)
-   
+
+def instance_client_bot():
+    # Istanza del client Pyrogram
+    bot = Client("job_board_bot", api_id=int(API_ID), api_hash=API_HASH, bot_token=BOT_TOKEN)
+    return bot
+
 # Costanti ANSI per log colorati
 RESET = "\033[0m"
 GREEN = "\033[92m"
