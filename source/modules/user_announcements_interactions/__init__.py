@@ -1,0 +1,1 @@
+# Questo file rende la cartella 'user_announcements_interactions' un pacchetto Python.

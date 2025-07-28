@@ -4,6 +4,7 @@ Esegui questo file per avviare il bot.
 """
 import logging
 import sys
+
 # Importa l'istanza del bot dal modulo di configurazione
 from config import bot
 
