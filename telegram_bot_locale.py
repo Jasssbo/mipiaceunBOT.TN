@@ -2,7 +2,6 @@
 Bot Telegram per la gestione di annunci, progetti, eventi e profili lavorativi.
 Gestisce topic, pubblicazione, eliminazione e interazione utente con logging colorato.
 """
-
 import os
 import sys
 import logging
@@ -29,7 +28,7 @@ if not all([API_ID, API_HASH, BOT_TOKEN]):
     missing = [var for var in ["API_ID", "API_HASH", "BOT_TOKEN"] if not locals()[var]]
     logging.critical(f"Missing required .env variables: {', '.join(missing)}")
     sys.exit(1)
-   
+
 # --- CONFIGURAZIONE LOGGING ---
 # Configurazione del formato e del livello di logging per il debug e il monitoraggio.
 logging.basicConfig(
@@ -94,7 +93,6 @@ user_data = {}
 # Definisci gli ID dei topic consentiti e NON consentiti per l'invio di messaggi
 ALLOWED_TOPIC_IDS = [1]  # Sostituisci con gli ID dei topic dove gli utenti possono scrivere liberamente
 NOT_ALLOWED_TOPIC_IDS = [10, 11, 12, 28]  # Sostituisci con gli ID dei topic dove SOLO il bot può pubblicare
-
 
 # --- FUNZIONI DI UTILITÀ ---
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=4, max=60),
@@ -167,8 +165,7 @@ async def update_preview_with_id(client, user_id, preview_id, info, ann_id):
     except Exception as e:
         logging.warning("Impossibile aggiornare la preview con l'ID annuncio.")
 
-
-# --- Funzione per pubblicare l'annuncio ---
+# --- Funzione per pubblicare l'annuncio nel topic corretto ---
 async def publish_announcement(client, user_id, info):
     """
     Pubblica l'annuncio compilato dall'utente nel gruppo pubblico.
@@ -217,7 +214,6 @@ async def send_clean_message(client, user_id, chat_id, text, reply_markup=None):
     user_data[user_id]["messages_to_delete"].append(sent.id)
 
 # ------------------------ HANDLER /start ------------------------
-
 async def is_user_allowed(client, user_id):
     """
     Controlla se l'utente è membro effettivo del gruppo Telegram.
@@ -356,7 +352,6 @@ async def collect_data_handler(client, message: Message):
     except Exception as e:
         logging.exception(f"{YELLOW}Errore nella raccolta dei dati durante la compilazione dell'annuncio.{RESET}")
 
-
 # ------------------------ HANDLER CALLBACK ------------------------
 # callback_handler: Gestisce tutte le interazioni con i bottoni InlineKeyboard, 
 # come la navigazione tra le domande, la conferma o l'annullamento della pubblicazione,
@@ -378,7 +373,8 @@ async def callback_handler(client, callback_query: CallbackQuery):
                     [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
                 ])
             )
-             # --- Ritorno al menù principale ---
+            
+        # --- Ritorno al menù principale ---
         elif data == "back_to_menu":
             user = await client.get_users(user_id)
             if not await is_user_allowed_by_username(client, user):
@@ -536,7 +532,6 @@ async def callback_handler(client, callback_query: CallbackQuery):
         await send_clean_message(client, user_id, user_id, f"❌ Errore: {str(e)}")
 
 # ------------------------ TOPIC GUARDIAN ------------------------
-
 # --- Handler per controllo e moderazione dei topic: elimina messaggi non consentiti nei topic vietati ---
 ALLOWED_TOPIC_ID = 1  # Sostituisci con l'ID del topic dove gli utenti possono scrivere liberamente
 FORBIDDEN_TOPIC_IDS = [10, 11, 12, 28]  # Sostituisci con gli ID dei topic dove solo il bot può pubblicare
