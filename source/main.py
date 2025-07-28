@@ -4,7 +4,11 @@ Esegui questo file per avviare il bot.
 """
 import logging
 import sys
-from src.config import bot
+from pyrogram import Client
+from source.config import API_ID, API_HASH, BOT_TOKEN
+
+# Istanza del client Pyrogram
+bot = Client("job_board_bot", api_id=int(API_ID), api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # Configurazione del formato e del livello del testo dei log, per il debug e il monitoraggio.
 logging.basicConfig(
@@ -13,11 +17,11 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 # Importa gli handler per attivarli
-from modules.user_announcements_interactions.start import start_handler
-from modules.user_announcements_interactions import announcement_compiler
-from modules.user_announcements_interactions.collect_data import collect_data_handler
-from modules.user_announcements_interactions.buttons import buttons_callback_handler
-from src.modules.topic_guardian import topic_guardian_handler
+from source.modules.user_announcements_interactions.start import start_handler
+from source.modules.user_announcements_interactions import announcement_compiler
+from source.modules.user_announcements_interactions.collect_data import collect_data_handler
+from source.modules.user_announcements_interactions.buttons import buttons_callback_handler
+from source.modules.topic_guardian import topic_guardian_handler
 
 # Richiama le funzioni per avviarle
 # start_handler: Avvia il bot e gestisce il comando /start.

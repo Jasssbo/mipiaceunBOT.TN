@@ -3,7 +3,7 @@ Handler per controllo e moderazione dei topic: elimina messaggi non consentiti n
 """
 import logging
 from pyrogram import filters
-from src.config import ALLOWED_TOPIC_IDS, NOT_ALLOWED_TOPIC_IDS, CHAT_ID, GREEN, RED, YELLOW, RESET, bot
+from source.config import ALLOWED_TOPIC_IDS, NOT_ALLOWED_TOPIC_IDS, CHAT_ID, GREEN, RED, YELLOW, RESET, bot
 from pyrogram.types import Message
 
 @bot.on_message(filters.group)

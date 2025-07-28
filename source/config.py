@@ -6,7 +6,6 @@ import logging
 import sys
 import os
 from dotenv import load_dotenv
-from pyrogram import Client
 
 # Caricamento variabili ambiente
 load_dotenv("bot_infos.env")
@@ -39,8 +38,6 @@ POINTER_MESSAGE_IDS = {
 ALLOWED_TOPIC_IDS = [1]  # Sostituisci con gli ID dei topic dove gli utenti possono scrivere liberamente
 NOT_ALLOWED_TOPIC_IDS = [10, 11, 12, 28]  # Sostituisci con gli ID dei topic dove SOLO il bot può pubblicare
 
-# Istanza del client Pyrogram
-bot = Client("job_board_bot", api_id=int(API_ID), api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # --- Dizionario per gestire lo stato e i dati di ogni utente ---
 user_data = {}
