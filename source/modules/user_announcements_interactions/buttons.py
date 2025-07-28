@@ -7,8 +7,6 @@ from config import CATEGORY_QUESTIONS, user_data, bot, CHAT_ID, YELLOW, GREEN, R
 from modules.user_announcements_interactions.announcement_compiler import send_clean_message, send_preview, update_preview_with_id, publish_announcement, is_user_allowed_by_username, safe_delete
 from source.modules.topic_guardian import is_user_allowed_by_username
 
-from config import instance_client_bot
-bot = instance_client_bot()
 # ------------------------ BUTTONS CALLBACK HANDLER ------------------------
 # buttons_callback_handler: Gestisce tutte le interazioni con i bottoni InlineKeyboard, 
 # come la navigazione tra le domande, la conferma o l'annullamento della pubblicazione,

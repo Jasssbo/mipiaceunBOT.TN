@@ -8,8 +8,6 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 from config import GREEN, RED, YELLOW, RESET, user_data, bot
 from modules.user_announcements_interactions.announcement_compiler import send_clean_message, is_user_allowed_by_username
 
-from config import instance_client_bot
-bot = instance_client_bot()
 # --- Handler per comando /start: verifica presenza utente nel gruppo e mostra menù principale ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message: Message):

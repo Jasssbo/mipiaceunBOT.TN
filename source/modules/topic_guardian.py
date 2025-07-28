@@ -6,9 +6,6 @@ from pyrogram import filters
 from source.config import ALLOWED_TOPIC_IDS, NOT_ALLOWED_TOPIC_IDS, CHAT_ID, GREEN, RED, YELLOW, RESET, bot
 from pyrogram.types import Message
 
-from config import instance_client_bot
-bot = instance_client_bot()
-
 @bot.on_message(filters.group)
 async def topic_guardian_handler(client, message: Message):
     logging.info(f"[TOPIC GUARDIAN] Handler eseguito per message.id={getattr(message, 'id', None)} in chat.id={getattr(message.chat, 'id', None)}")

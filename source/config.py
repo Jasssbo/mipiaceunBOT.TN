@@ -22,10 +22,8 @@ if not all([API_ID, API_HASH, BOT_TOKEN]):
     logging.critical(f"Missing required .env variables: {', '.join(missing)}")
     sys.exit(1)
 
-def instance_client_bot():
-    # Istanza del client Pyrogram
-    bot = Client("job_board_bot", api_id=int(API_ID), api_hash=API_HASH, bot_token=BOT_TOKEN)
-    return bot
+ # Istanza del client Pyrogram
+bot = Client("job_board_bot", api_id=int(API_ID), api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # Costanti ANSI per log colorati
 RESET = "\033[0m"

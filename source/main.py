@@ -4,9 +4,9 @@ Esegui questo file per avviare il bot.
 """
 import logging
 import sys
+# Importa l'istanza del bot dal modulo di configurazione
+from config import bot
 
-from config import instance_client_bot
-bot = instance_client_bot()
 
 # Configurazione del formato e del livello del testo dei log, per il debug e il monitoraggio.
 logging.basicConfig(

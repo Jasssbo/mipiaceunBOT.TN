@@ -4,11 +4,9 @@ Handler per la raccolta dati utente: gestisce domande, risposte e preview, elimi
 import logging
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
-from config import GREEN, RED, YELLOW, RESET,CATEGORY_QUESTIONS, user_data
+from config import GREEN, RED, YELLOW, RESET,CATEGORY_QUESTIONS, user_data, bot
 from modules.user_announcements_interactions.announcement_compiler import send_preview, send_clean_message
 
-from config import instance_client_bot
-bot = instance_client_bot()
 # ------------------------ RACCOLTA DATI UTENTE ------------------------
 # --- Handler per la raccolta dati utente: gestisce domande, risposte e preview, eliminando i messaggi precedenti. ---
 @bot.on_message(filters.private & ~filters.command("start"))
