@@ -8,7 +8,6 @@ import sys
 from config import instance_client_bot
 bot = instance_client_bot()
 
-
 # Configurazione del formato e del livello del testo dei log, per il debug e il monitoraggio.
 logging.basicConfig(
     level=logging.INFO,
