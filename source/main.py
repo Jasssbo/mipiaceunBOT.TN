@@ -21,18 +21,6 @@ from modules.user_announcements_interactions.collect_data import collect_data_ha
 from modules.user_announcements_interactions.buttons import buttons_callback_handler
 from modules.topic_guardian import topic_guardian_handler
 
-# Richiama le funzioni per avviarle
-# start_handler: Avvia il bot e gestisce il comando /start.
-start_handler()
-# announcement_compiler: Gestisce la compilazione degli annunci.
-announcement_compiler()
-# collect_data_handler: Gestisce la raccolta dei dati dagli utenti.
-collect_data_handler()
-# buttons_callback_handler: Gestisce i callback dei pulsanti.
-buttons_callback_handler()
-# topic_guardian_handler: Gestisce la protezione dei topic e le autorizzazioni degli utenti.
-topic_guardian_handler()
-
 # ------------------------ AVVIO e ARRESTO BOT ------------------------
 # --- Avvio e arresto del bot Telegram ---
 if __name__ == "__main__":
