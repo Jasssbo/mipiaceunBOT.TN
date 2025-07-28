@@ -4,8 +4,8 @@ Esegui questo file per avviare il bot.
 """
 import logging
 import sys
-from source.config import instance_client_bot
 
+from config import instance_client_bot
 bot = instance_client_bot()
 
 
