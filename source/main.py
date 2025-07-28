@@ -5,7 +5,7 @@ Esegui questo file per avviare il bot.
 import logging
 import sys
 from pyrogram import Client
-from source.config import API_ID, API_HASH, BOT_TOKEN
+from config import API_ID, API_HASH, BOT_TOKEN
 
 # Istanza del client Pyrogram
 bot = Client("job_board_bot", api_id=int(API_ID), api_hash=API_HASH, bot_token=BOT_TOKEN)
