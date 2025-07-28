@@ -3,7 +3,6 @@ from config import CHAT_ID, GREEN, RED, YELLOW, RESET, user_data, POINTER_MESSAG
 from modules.topic_guardian import is_user_allowed_by_username
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from pyrogram import errors
-
 pointer_ids = POINTER_MESSAGE_IDS
 
 # Funzione per cancellare i messaggi in modo sicuro, gestendo le eccezioni

@@ -3,7 +3,7 @@ Handler per tutte le interazioni con i bottoni InlineKeyboard.
 """
 import logging
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from config import CATEGORY_QUESTIONS, user_data, bot, CHAT_ID, YELLOW, GREEN, RED, RESET
+from config import CATEGORY_QUESTIONS, user_data, bot, CHAT_ID, YELLOW, GREEN, RED, RESET, POINTER_MESSAGE_IDS
 from modules.user_announcements_interactions.announcement_compiler import send_clean_message, send_preview, update_preview_with_id, publish_announcement, is_user_allowed_by_username, safe_delete
 from modules.topic_guardian import is_user_allowed_by_username
 
@@ -54,7 +54,7 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                 await client.send_message(uid, "❌ Solo gli utenti presenti nel gruppo possono pubblicare. Assicurati di avere un @username pubblico (nel tuo profilo) e di essere nel gruppo (https://t.me/mipiaceunBOTTN).")
                 return
             info = user_data[uid]
-            msg = await publish_announcement(client, uid, info)
+            msg = await publish_announcement(client, uid, info, POINTER_MESSAGE_IDS)
             if msg:
                 preview_id = info.get("preview_msg_id")
                 if preview_id:
