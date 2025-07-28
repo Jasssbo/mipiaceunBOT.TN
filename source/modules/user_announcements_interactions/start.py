@@ -5,7 +5,7 @@ Verifica la presenza dell'utente nel gruppo e mostra il menù principale.
 import logging
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
-from source.config import GREEN, RED, YELLOW, RESET, user_data, bot
+from config import GREEN, RED, YELLOW, RESET, user_data, bot
 from modules.user_announcements_interactions.announcement_compiler import send_clean_message, is_user_allowed_by_username
 
 # --- Handler per comando /start: verifica presenza utente nel gruppo e mostra menù principale ---

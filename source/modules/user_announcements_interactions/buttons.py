@@ -3,7 +3,7 @@ Handler per tutte le interazioni con i bottoni InlineKeyboard.
 """
 import logging
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from source.config import CATEGORY_QUESTIONS, user_data, bot, CHAT_ID, YELLOW, GREEN, RED, RESET
+from config import CATEGORY_QUESTIONS, user_data, bot, CHAT_ID, YELLOW, GREEN, RED, RESET
 from modules.user_announcements_interactions.announcement_compiler import send_clean_message, send_preview, update_preview_with_id, publish_announcement, is_user_allowed_by_username, safe_delete
 from source.modules.topic_guardian import is_user_allowed_by_username
 

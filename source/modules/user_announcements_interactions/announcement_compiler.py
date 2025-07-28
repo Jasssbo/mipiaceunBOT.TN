@@ -1,6 +1,6 @@
 import logging
-from source.config import CHAT_ID, GREEN, RED, YELLOW, RESET, user_data
-from source.modules.topic_guardian import is_user_allowed_by_username
+from config import CHAT_ID, GREEN, RED, YELLOW, RESET, user_data
+from modules.topic_guardian import is_user_allowed_by_username
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from pyrogram import errors
 

@@ -4,7 +4,7 @@ Handler per la raccolta dati utente: gestisce domande, risposte e preview, elimi
 import logging
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
-from source.config import GREEN, RED, YELLOW, RESET,CATEGORY_QUESTIONS, user_data
+from config import GREEN, RED, YELLOW, RESET,CATEGORY_QUESTIONS, user_data
 from modules.user_announcements_interactions.announcement_compiler import send_preview, send_clean_message
 from source.config import bot
 
