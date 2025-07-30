@@ -46,8 +46,3 @@ Permette la creazione, la preview, la pubblicazione e l’eliminazione di annunc
 - `src/utils/`: Funzioni di utilità (annunci, stato utente, ecc.)
     - `announcement.py`: Funzioni per annunci, preview, pubblicazione, permessi
 - `src/main.py`: Avvio del bot
-
----
-
-> Ogni file contiene commenti che spiegano a cosa serve.  
-> Se hai dubbi, chiedi pure!
