@@ -3,6 +3,7 @@ from config import CHAT_ID, GREEN, RED, YELLOW, RESET, user_data, POINTER_MESSAG
 from modules.topic_guardian import is_user_allowed_by_username
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from pyrogram import errors
+from pyrogram.types import InputMediaPhoto, InputMediaDocument
 pointer_ids = POINTER_MESSAGE_IDS
 
 # Funzione per cancellare i messaggi in modo sicuro, gestendo le eccezioni
@@ -42,6 +43,26 @@ def build_announcement_text(info, user, show_id=None):
 async def send_preview(client, user_id, info):
     user = await client.get_users(user_id)
     text = build_announcement_text(info, user)
+    files = info.get("files", {})
+    multi_file_label = None
+    multi_file_list = []
+    for label, filelist in files.items():
+        if filelist:
+            multi_file_label = label
+            multi_file_list = filelist
+            break
+    preview_noid_msg_ids = []
+    if multi_file_list:
+        media = []
+        for idx, f in enumerate(multi_file_list):
+            if f["file_type"] == "photo":
+                media.append(InputMediaPhoto(f["file_id"], caption=text if idx == 0 else None))
+            else:
+                media.append(InputMediaDocument(f["file_id"], caption=text if idx == 0 else None))
+        msgs = await client.send_media_group(user_id, media)
+        preview_noid_msg_ids = [m.id for m in msgs]
+        info["preview_noid_msg_ids"] = preview_noid_msg_ids
+        return msgs[0].id
     file_id = info.get("file")
     file_type = info.get("file_type")
     if file_id:
@@ -49,8 +70,11 @@ async def send_preview(client, user_id, info):
             msg = await client.send_photo(user_id, file_id, caption=text)
         else:
             msg = await client.send_document(user_id, file_id, caption=text)
+        preview_noid_msg_ids = [msg.id]
     else:
         msg = await client.send_message(user_id, text)
+        preview_noid_msg_ids = [msg.id]
+    info["preview_noid_msg_ids"] = preview_noid_msg_ids
     return msg.id
 
 # --- Funzione per aggiornare la preview dell'annuncio con l'ID assegnato dopo la pubblicazione ---
@@ -71,20 +95,56 @@ async def update_preview_with_id(client, user_id, preview_id, info, ann_id):
 async def publish_announcement(client, user_id, info, pointer_ids):
     user = await client.get_users(user_id)
     text = build_announcement_text(info, user, show_id=None)
-    file_id = info.get("file")
-    file_type = info.get("file_type")
+    files = info.get("files", {})
+    multi_file_label = None
+    multi_file_list = []
+    for label, filelist in files.items():
+        if filelist:
+            multi_file_label = label
+            multi_file_list = filelist
+            break
     pointer_id = pointer_ids.get(info["category"])
     username = user.username if user.username else user.first_name
     presente = await is_user_allowed_by_username(client, user)
     msg = None
-    if file_id:
-        if file_type == "photo":
-            msg = await client.send_photo(CHAT_ID, file_id, caption=text, reply_to_message_id=pointer_id)
-        else:
-            msg = await client.send_document(CHAT_ID, file_id, caption=text, reply_to_message_id=pointer_id)
+    ann_media_ids = []
+    if multi_file_list:
+        media = []
+        for idx, f in enumerate(multi_file_list):
+            if f["file_type"] == "photo":
+                media.append(InputMediaPhoto(f["file_id"], caption=text if idx == 0 else None))
+            else:
+                media.append(InputMediaDocument(f["file_id"], caption=text if idx == 0 else None))
+        msgs = await client.send_media_group(CHAT_ID, media, reply_to_message_id=pointer_id)
+        if msgs:
+            msg = msgs[0]
+            ann_media_ids = [m.id for m in msgs]
     else:
-        msg = await client.send_message(CHAT_ID, text, reply_to_message_id=pointer_id)
+        file_id = info.get("file")
+        file_type = info.get("file_type")
+        if file_id:
+            if file_type == "photo":
+                msg = await client.send_photo(CHAT_ID, file_id, caption=text, reply_to_message_id=pointer_id)
+            else:
+                msg = await client.send_document(CHAT_ID, file_id, caption=text, reply_to_message_id=pointer_id)
+            ann_media_ids = [msg.id]
+        else:
+            msg = await client.send_message(CHAT_ID, text, reply_to_message_id=pointer_id)
+            ann_media_ids = [msg.id]
     ann_id = msg.id if msg else None
+
+    # Salva tutti gli id dei messaggi pubblicati (media group o singolo)
+    info["last_ann_media_ids"] = ann_media_ids
+
+    # Elimina la preview senza ID dopo la pubblicazione (tutte le foto)
+    preview_noid_msg_ids = info.get("preview_noid_msg_ids")
+    if preview_noid_msg_ids:
+        try:
+            await client.delete_messages(user_id, preview_noid_msg_ids)
+        except Exception:
+            pass
+        info["preview_noid_msg_ids"] = None
+
     if presente is True:
         logging.info(f"{GREEN}[PUBBLICAZIONE] l'Utente: {username} ha pubblicato un annuncio, ID annuncio: {ann_id}. L'Utente è Presente nel gruppo.{RESET}")
     elif presente is False:

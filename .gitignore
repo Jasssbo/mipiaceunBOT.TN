@@ -10,4 +10,3 @@ job_bot.session
 __pycache__/
 *.pyc
 .DS_Store
-bot_infos.env

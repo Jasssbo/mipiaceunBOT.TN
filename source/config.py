@@ -52,37 +52,39 @@ user_data = {}
 # Contiene le domande per ogni categoria di annuncio. Ogni domanda ha un'etichetta e un'opzione per essere saltata.
 CATEGORY_QUESTIONS = {
     "job": [
-        {"question": "💼 Scrivi qui il TITOLO LAVORATIVO che cerchi (es. Fonico):", "label": "💼 Titolo lavorativo richiesto:", "skippable": False},
-        {"question": "📜 DESCRIVI LA MANSIONE e ciò di cui si dovrà occupare:", "label": "📜 Descrizione mansione:", "skippable": False},
-        {"question": "📍 Scrivi qui il LUOGO in cui richiedi questa figura:", "label": "📍 Luogo del Lavoro:", "skippable": False},
-        {"question": "💰 Scrivi qui il COMPENSO (opzionale):", "label": "💰 Compenso:", "skippable": True},
-        {"question": "📞 Scrivi qui i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
+        {"question": "💼 Scrivi qui il TITOLO LAVORATIVO che cerchi (es. Fonico):", "label": "💼 Titolo lavorativo richiesto:", "skippable": False, "allowed_types": ["text"]},
+        {"question": "📜 DESCRIVI LA MANSIONE e ciò di cui si dovrà occupare:", "label": "📜 Descrizione mansione:", "skippable": False, "allowed_types": ["text"]},
+        {"question": "📍 Scrivi qui il LUOGO in cui richiedi questa figura:", "label": "📍 Luogo del Lavoro:", "skippable": False, "allowed_types": ["text"]},
+        {"question": "💰 Scrivi qui il COMPENSO (opzionale):", "label": "💰 Compenso:", "skippable": True, "allowed_types": ["text"]},
+        {"question": "📞 Scrivi qui i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False, "allowed_types": ["text"]}
     ],
     "project": [
-        {"question": "💡 Scrivi qui il TITOLO DEL PROGETTO:", "label": "💡 Titolo del Progetto:", "skippable": False},
-        {"question": "📜 DESCRIVI IL TUO PROGETTO e spiega a quali ambiti è riferito:", "label": "📜 Descrizione del Progetto:", "skippable": False},
-        {"question": "🖼️ Scrivi qui la LOCANDINA del PROGETTO (opzionale):", "label": "🖼️ Locandina:", "skippable": True},
-        {"question": "🔗 Scrivi qui un LINK (opzionale):", "label": "🔗 Link:", "skippable": True},
-        {"question": "📌 Puoi CARICARE UN FILE (opzionale):", "label": "📌 File allegato:", "skippable": True},
-        {"question": "📞 Scrivi qui i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
+        {"question": "💡 Scrivi qui il TITOLO DEL PROGETTO:", "label": "💡 Titolo del Progetto:", "skippable": False, "allowed_types": ["text"]},
+        {"question": "📜 DESCRIVI IL TUO PROGETTO e spiega a quali ambiti è riferito:", "label": "📜 Descrizione del Progetto:", "skippable": False, "allowed_types": ["text"]},
+        {"question": "🖼️ Scrivi qui la LOCANDINA del PROGETTO (opzionale):", "label": "🖼️ Locandina:", "skippable": True, "allowed_types": ["photo"]},
+        {"question": "🔗 Scrivi qui un LINK (opzionale):", "label": "🔗 Link:", "skippable": True, "allowed_types": ["text"]},
+        {"question": "📌 Puoi CARICARE UN FILE (opzionale):", "label": "📌 File allegato:", "skippable": True, "allowed_types": ["document"]},
+        {"question": "📞 Scrivi qui i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False, "allowed_types": ["text"]}
     ],
     "event": [
-        {"question": "🎫 Scrivi qui il NOME DELL'EVENTO:", "label": "🎫 Nome evento:", "skippable": False},
-        {"question": "📰 Inviami il VOLANTINO / FLYER dell'EVENTO (opzionale):", "label": "📰 Flyer:","skippable": True},
-        {"question": "📍 Scrivi qui il LUOGO:", "label": "📍 Luogo:", "skippable": False},
-        {"question": "⏰ Scrivi qui la DATA E l'ORA dell'evento:", "label": "⏰ Data e ora:", "skippable": False},
-        {"question": "💰 Scrivi qui il COSTO del BIGLIETTO (opzionale):", "label": "💰 Costo biglietto:", "skippable": True},
-        {"question": "📞 Scrivi qui i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
+        {"question": "🎫 Scrivi qui il NOME DELL'EVENTO:", "label": "🎫 Nome evento:", "skippable": False, "allowed_types": ["text"]},
+        {"question": "📰 Inviami il VOLANTINO / FLYER dell'EVENTO (puoi inviare più foto, es. fronte e retro. Quando hai finito premi /done):",
+            "label": "📰 Flyer:","skippable": True, "multi_file": True, "allowed_types": ["photo"]},
+        {"question": "📍 Scrivi qui il LUOGO:", "label": "📍 Luogo:", "skippable": False, "allowed_types": ["text"]},
+        {"question": "⏰ Scrivi qui la DATA E l'ORA dell'evento:", "label": "⏰ Data e ora:", "skippable": False, "allowed_types": ["text"]},
+        {"question": "💰 Scrivi qui il COSTO del BIGLIETTO (opzionale):", "label": "💰 Costo biglietto:", "skippable": True, "allowed_types": ["text"]},
+        {"question": "📞 Scrivi qui i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False, "allowed_types": ["text"]}
     ],
     "profile": [
-        {"question": "👤 Scrivi qui il tuo NOME E COGNOME:", "label": "👤 Nome e cognome:", "skippable": False},
-        {"question": "💼 Scrivi qui la tua PROFESSIONE:", "label": "💼 Professione:", "skippable": False},
-        {"question": "🖼️ Carica una tua FOTO:", "label": "🖼️ Foto:", "skippable": True},
-        {"question": "📝 Scrivi una tua breve BIOGRAFIA (opzionale):", "label": "📝 Bio.:", "skippable": True},
-        {"question": "📜 DESCRIVI brevemente le competenze (max. 5 righe):", "label": "📜 Competenze:", "skippable": False},
-        {"question": "📎 Puoi allegare il file del TUO CURRICULUM (opzionale):", "label": "📝 Curriculum:", "skippable": True},
-        {"question": "🔗 LINK al tuo Profilo LinkedIn (opzionale):", "label": "🔗 LinkedIn:", "skippable": True},
-        {"question": "📞 Scrivi qui i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False}
+        {"question": "👤 Scrivi qui il tuo NOME E COGNOME:", "label": "👤 Nome e cognome:", "skippable": False, "allowed_types": ["text"]},
+        {"question": "💼 Scrivi qui la tua PROFESSIONE:", "label": "💼 Professione:", "skippable": False, "allowed_types": ["text"]},
+        {"question": "🖼️ Carica una tua FOTO o dei tuoi lavori (puoi inviare più foto, Quando hai finito premi /done):",
+            "label": "🖼️ Foto/Lavori:","skippable": True, "multi_file": True, "allowed_types": ["photo"]},
+        {"question": "📝 Scrivi una tua breve BIOGRAFIA (opzionale):", "label": "📝 Bio.:", "skippable": True, "allowed_types": ["text"]},
+        {"question": "📜 DESCRIVI brevemente le competenze (max. 5 righe):", "label": "📜 Competenze:", "skippable": False, "allowed_types": ["text"]},
+        #{"question": "📎 Puoi allegare il file del TUO CURRICULUM (opzionale):", "label": "📝 Curriculum:", "skippable": True, "allowed_types": ["document"]},
+        {"question": "🔗 LINK al tuo Profilo LinkedIn (opzionale):", "label": "🔗 LinkedIn:", "skippable": True, "allowed_types": ["text"]},
+        {"question": "📞 Scrivi qui i tuoi CONTATTI (es. @IlTuoNickTelegram, Telefono, Email..):", "label": "📞 Contatti:", "skippable": False, "allowed_types": ["text"]}
     ]
 }
 

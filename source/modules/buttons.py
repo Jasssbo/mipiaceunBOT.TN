@@ -54,22 +54,61 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                 await client.send_message(uid, "❌ Solo gli utenti presenti nel gruppo possono pubblicare. Assicurati di avere un @username pubblico (nel tuo profilo) e di essere nel gruppo (https://t.me/mipiaceunBOTTN).")
                 return
             info = user_data[uid]
+            # Pubblica l'annuncio nel gruppo e salva tutti gli id dei messaggi pubblicati
             msg = await publish_announcement(client, uid, info, POINTER_MESSAGE_IDS)
-            if msg:
-                preview_id = info.get("preview_msg_id")
-                if preview_id:
-                    await update_preview_with_id(client, uid, preview_id, info, msg.id)
-                await client.delete_messages(uid, callback_query.message.id)
-                conferma = (
-                    f"✅ Annuncio pubblicato!\n"
-                    f"ID annuncio: {msg.id}\n"
-                    f"Puoi eliminare questo annuncio in qualsiasi momento premendo il bottone qui sotto."
-                )
-                menu_btn = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🗑️ Elimina questo annuncio", callback_data=f"delete_{msg.id}_{preview_id}")],
-                    [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
-                ])
-                confirm_msg = await client.send_message(uid, conferma, reply_markup=menu_btn)
+            ann_media_ids = []
+            if "last_ann_media_ids" in info:
+                ann_media_ids = info["last_ann_media_ids"]
+            else:
+                # fallback: salva solo l'id principale
+                ann_media_ids = [msg.id] if msg else []
+            # Invia una nuova preview privata con ID e bottoni, salva tutti gli id
+            from modules.user_announcements_interactions.announcement_compiler import build_announcement_text
+            text = build_announcement_text(info, user, show_id=msg.id)
+            files = info.get("files", {})
+            multi_file_label = None
+            multi_file_list = []
+            for label, filelist in files.items():
+                if filelist:
+                    multi_file_label = label
+                    multi_file_list = filelist
+                    break
+            preview_with_ids = []
+            if multi_file_list:
+                from pyrogram.types import InputMediaPhoto, InputMediaDocument
+                media = []
+                for idx, f in enumerate(multi_file_list):
+                    if f["file_type"] == "photo":
+                        media.append(InputMediaPhoto(f["file_id"], caption=text if idx == 0 else None))
+                    else:
+                        media.append(InputMediaDocument(f["file_id"], caption=text if idx == 0 else None))
+                sent_msgs = await client.send_media_group(uid, media)
+                preview_with_ids = [m.id for m in sent_msgs]
+            else:
+                file_id = info.get("file")
+                file_type = info.get("file_type")
+                if file_id:
+                    if file_type == "photo":
+                        sent = await client.send_photo(uid, file_id, caption=text)
+                    else:
+                        sent = await client.send_document(uid, file_id, caption=text)
+                    preview_with_ids = [sent.id]
+                else:
+                    sent = await client.send_message(uid, text)
+                    preview_with_ids = [sent.id]
+            info["preview_msg_id"] = preview_with_ids
+            await client.delete_messages(uid, callback_query.message.id)
+            conferma = (
+                f"✅ Annuncio pubblicato!\n"
+                f"ID annuncio: {msg.id}\n"
+                f"Puoi eliminare questo annuncio in qualsiasi momento premendo il bottone qui sotto."
+            )
+            menu_btn = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🗑️ Elimina questo annuncio", callback_data=f"delete_{','.join(str(i) for i in ann_media_ids)}_{','.join(str(i) for i in preview_with_ids)}")],
+                [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
+            ])
+            confirm_msg = await client.send_message(uid, conferma, reply_markup=menu_btn)
+            if confirm_msg:
                 user_data[uid]["confirm_msg_id"] = confirm_msg.id
                 
         # --- Annullamento pubblicazione annuncio ---
@@ -100,25 +139,22 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
         elif data.startswith("delete_"):
             try:
                 parts = data.split("_")
-                ann_id = int(parts[1])
-                preview_id = int(parts[2]) if len(parts) > 2 else None
+                # ora: delete_annid1,annid2,annid3_previewid1,previewid2,previewid3
+                ann_ids = [int(i) for i in parts[1].split(",") if i and i != 'None']
+                # preview_ids = [int(i) for i in parts[2].split(",") if i and i != 'None'] if len(parts) > 2 else []
                 user = callback_query.from_user
-                msg = await client.get_messages(CHAT_ID, ann_id)
-                text = msg.text or msg.caption or ""
-                author = f"@{user.username}" if user.username else user.first_name
-                if author not in text:
-                    await callback_query.answer("❌ Non sei l'autore di questo annuncio.", show_alert=True)
-                    return
-                await client.delete_messages(CHAT_ID, ann_id)
+                # Elimina tutti i messaggi dell'annuncio (media group o singolo)
+                if ann_ids:
+                    await client.delete_messages(CHAT_ID, ann_ids)
                 # Elimina il messaggio di conferma pubblicazione (con bottone elimina)
                 await client.delete_messages(user.id, callback_query.message.id)
-                # Mostra conferma eliminazione con bottone torna al menù
+                # NON eliminare più la preview privata con ID, lasciarla come storico
                 menu_btn = InlineKeyboardMarkup([
                     [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
                 ])
                 await client.send_message(
                     user.id,
-                    f"✅ Annuncio eliminato con successo.\nID annuncio: {ann_id}",
+                    f"✅ Annuncio eliminato con successo.\nID annuncio: {ann_ids[0] if ann_ids else '-'}",
                     reply_markup=menu_btn
                 )
                 await callback_query.answer("Hai cancellato il tuo annuncio.", show_alert=False)
@@ -180,7 +216,7 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                 ])
                 confirm_msg = await client.send_message(user_id, "✅ Confermi di voler pubblicare questo annuncio?", reply_markup=confirm_btns)
                 user_data[user_id]["confirm_msg_id"] = confirm_msg.id
-
     except Exception as e:
         logging.exception(f"{YELLOW}Errore nel callback handler.{RESET}")
         await send_clean_message(client, user_id, user_id, f"❌ Errore: {str(e)}")
+

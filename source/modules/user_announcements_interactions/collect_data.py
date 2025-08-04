@@ -26,6 +26,107 @@ async def collect_data_handler(client, message: Message):
         question_data = CATEGORY_QUESTIONS[cat][step]
         question_text = question_data["question"]
         label_text = question_data["label"]
+        multi_file = question_data.get("multi_file", False)
+        allowed_types = question_data.get("allowed_types", ["text"])
+
+        # --- Controllo tipo di messaggio per la domanda corrente ---
+        msg_type = None
+        if message.text and not message.photo and not message.document:
+            msg_type = "text"
+        elif message.photo:
+            msg_type = "photo"
+        elif message.document:
+            msg_type = "document"
+        elif message.audio:
+            msg_type = "audio"
+        elif message.voice:
+            msg_type = "voice"
+        elif message.video:
+            msg_type = "video"
+        # Puoi aggiungere altri tipi se vuoi bloccarli esplicitamente
+
+        # Se il tipo di messaggio non è tra quelli ammessi, blocca e avvisa
+        if msg_type and msg_type not in allowed_types:
+            await client.send_message(user.id, f"❗ Risposta non valida per questa domanda. Sono ammessi solo: {', '.join(allowed_types)}.")
+            return
+
+        # --- Gestione domande multi-file ---
+        if multi_file:
+            if "files" not in info:
+                info["files"] = {}
+            if label_text not in info["files"]:
+                info["files"][label_text] = []
+            # Inizializza la lista dei messaggi temporanei multi-file
+            if "multi_file_temp_msgs" not in info:
+                info["multi_file_temp_msgs"] = []
+            # Se arriva /done, termina la raccolta file e passa avanti
+            if message.text and message.text.lower().strip() == "/done":
+                # Elimina i messaggi temporanei di conferma file aggiunto
+                for mid in info.get("multi_file_temp_msgs", []):
+                    try:
+                        await client.delete_messages(user.id, mid)
+                    except Exception:
+                        pass
+                info["multi_file_temp_msgs"] = []
+                if info["files"][label_text]:
+                    info["answers"][label_text] = f"{len(info['files'][label_text])} file allegati."
+                else:
+                    info["answers"][label_text] = "Nessun file allegato."
+                # ...elimina messaggi precedenti e passa avanti...
+                if info.get("messages_to_delete"):
+                    last_bot_msg = info["messages_to_delete"].pop()
+                    try:
+                        await client.delete_messages(user.id, last_bot_msg)
+                    except Exception:
+                        pass
+                for mid in user_data[user.id].get("user_messages_to_delete", []):
+                    try:
+                        await client.delete_messages(user.id, mid)
+                    except Exception:
+                        pass
+                user_data[user.id]["user_messages_to_delete"].clear()
+                info["step"] += 1
+                if info["step"] < len(CATEGORY_QUESTIONS[cat]):
+                    question_data = CATEGORY_QUESTIONS[cat][info["step"]]
+                    buttons = [
+                        [InlineKeyboardButton("⬅️ Torna alla domanda precedente", callback_data="back_to_question")]
+                    ]
+                    if question_data.get("skippable"):
+                        buttons.insert(0, [InlineKeyboardButton("⏭️ Salta questa domanda", callback_data="skip_question")])
+                    buttons.append([InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")])
+                    sent = await client.send_message(user.id, question_data["question"], reply_markup=InlineKeyboardMarkup(buttons))
+                    if "messages_to_delete" not in info:
+                        info["messages_to_delete"] = []
+                    info["messages_to_delete"].append(sent.id)
+                else:
+                    preview_id = await send_preview(client, user.id, info)
+                    user_data[user.id]["preview_msg_id"] = preview_id
+                    confirm_btns = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("✅ Conferma", callback_data=f"confirm_{user.id}")],
+                        [InlineKeyboardButton("❌ Annulla", callback_data=f"cancel_{user.id}")],
+                        [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
+                    ])
+                    confirm_msg = await client.send_message(user.id, "✅ Confermi di voler pubblicare questo annuncio?", reply_markup=confirm_btns)
+                    user_data[user.id]["confirm_msg_id"] = confirm_msg.id
+                return  # Fine gestione multi-file
+
+            # Se arriva una foto o documento, aggiungilo alla lista
+            if message.photo or message.document:
+                file_id = message.photo.file_id if message.photo else message.document.file_id
+                file_type = "photo" if message.photo else "document"
+                info["files"][label_text].append({"file_id": file_id, "file_type": file_type})
+                # Messaggio di conferma aggiunta file
+                sent = await client.send_message(user.id, f"✅ File aggiunto ({len(info['files'][label_text])}). Invia altri file o premi /done per continuare.")
+                info["multi_file_temp_msgs"].append(sent.id)
+                return  # Non avanzare step finché non arriva /done
+
+            # Se arriva testo diverso da /done, ignora o avvisa
+            if message.text:
+                sent = await client.send_message(user.id, "❗ Invia una foto o un documento, oppure premi /done per continuare.")
+                info["multi_file_temp_msgs"].append(sent.id)
+                return
+
+        # --- Gestione domande normali (singolo file o testo) ---
         if message.photo or message.document:
             info["answers"][label_text] = "📎 File allegato."
             info["file"] = message.photo.file_id if message.photo else message.document.file_id
