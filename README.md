@@ -1,17 +1,26 @@
+
 # TNet.WorkBOT
+
 
 ## Descrizione
 
 Bot Telegram per la gestione di annunci, progetti, eventi e profili lavorativi.  
 Permette la creazione, la preview, la pubblicazione e l’eliminazione di annunci tramite bottoni e interfaccia guidata.
 
+
 ---
+
+## Requisiti
+
+- Python 3.10 o superiore
+- Un bot Telegram e le relative credenziali (API_ID, API_HASH, BOT_TOKEN)
+
 
 ## Come si usa
 
 1. **Configura** il bot:
    - Inserisci i tuoi dati nel file `bot_infos.env` (API_ID, API_HASH, BOT_TOKEN).
-   - Se serve, modifica `src/config.py` per l'ID del gruppo o altre costanti.
+   - Se serve, modifica `source/config.py` per il TOKEN del BOT, l'ID del gruppo o altre costanti.
 
 2. **Installa le dipendenze**:
    - Da terminale, esegui:
@@ -22,27 +31,35 @@ Permette la creazione, la preview, la pubblicazione e l’eliminazione di annunc
 3. **Avvia il bot**:
    - Da terminale, esegui:
      ```
-     python src/main.py
+     python source/main.py
      ```
 
 ---
 
+
 ## Dove modificare cosa
 
-- **Configurazione**: `src/config.py`
-- **Handler dei bottoni/comandi**: `src/handlers/`
-- **Funzioni di utilità**: `src/utils/`
+- **Configurazione**: `source/config.py` — Token, chat_id, costanti, user_data
+- **Moduli principali**: `source/modules/` — Funzionalità core del bot
+- **Gestione annunci utente**: `source/modules/user_announcements_interactions/` — Tutto ciò che riguarda la creazione e gestione degli annunci
 
 ---
 
+
 ## Struttura
 
-- `src/config.py`: Configurazione bot (token, chat_id, costanti, user_data)
-- `src/handlers/`: Tutti i bottoni e le risposte agli utenti
-    - `start.py`: Handler per /start
+- `source/config.py`: Configurazione generale del bot
+- `source/modules/`: Moduli principali
+    - `start.py`: Handler per il comando /start
+    - `buttons.py`: Gestione dei bottoni inline
     - `collect_data.py`: Gestione domande/risposte utente
-    - `callback.py`: Gestione bottoni inline
     - `topic_guardian.py`: Moderazione dei topic
-- `src/utils/`: Funzioni di utilità (annunci, stato utente, ecc.)
-    - `announcement.py`: Funzioni per annunci, preview, pubblicazione, permessi
-- `src/main.py`: Avvio del bot
+    - `user_announcements_interactions/`: Moduli per la gestione degli annunci utente
+        - `announcement_compiler.py`: Compilazione e gestione degli annunci
+        - `collect_data.py`: Raccolta dati dagli utenti per gli annunci
+- `source/main.py`: Avvio del bot
+
+---
+
+> Ogni file contiene commenti che spiegano a cosa serve.  
+> Se hai dubbi, chiedi pure!

@@ -16,10 +16,10 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 # Importa gli handler per attivarli
-from modules.user_announcements_interactions.start import start_handler
+from modules.start import start_handler
 from modules.user_announcements_interactions import announcement_compiler
 from modules.user_announcements_interactions.collect_data import collect_data_handler
-from modules.user_announcements_interactions.buttons import buttons_callback_handler
+from modules.buttons import buttons_callback_handler
 from modules.topic_guardian import topic_guardian_handler
 
 # ------------------------ AVVIO e ARRESTO BOT ------------------------
