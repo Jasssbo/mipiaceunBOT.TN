@@ -44,6 +44,8 @@ POINTER_MESSAGE_IDS = {
 ALLOWED_TOPIC_IDS = [1]  # Sostituisci con gli ID dei topic dove gli utenti possono scrivere liberamente
 NOT_ALLOWED_TOPIC_IDS = [10, 11, 12, 28]  # Sostituisci con gli ID dei topic dove SOLO il bot può pubblicare
 
+ # Tempo entro cui l'utente deve finire l'annuncio altrimenti viene eliminato per alleggerire lo user_data
+announce_timeout = 180 #in secondi
 
 # --- Dizionario per gestire lo stato e i dati di ogni utente ---
 user_data = {}

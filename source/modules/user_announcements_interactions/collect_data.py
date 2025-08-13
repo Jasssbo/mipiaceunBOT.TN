@@ -2,23 +2,24 @@
 Handler per la raccolta dati utente: gestisce domande, risposte e preview, eliminando i messaggi precedenti.
 """
 import logging
+import asyncio
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
-from config import GREEN, RED, YELLOW, RESET,CATEGORY_QUESTIONS, user_data, bot
+from config import GREEN, RED, YELLOW, RESET,CATEGORY_QUESTIONS, user_data, bot, announce_timeout
 from modules.user_announcements_interactions.announcement_compiler import send_preview, send_clean_message
+from modules.buttons import send_main_menu
 
 # ------------------------ RACCOLTA DATI UTENTE ------------------------
 # --- Handler per la raccolta dati utente: gestisce domande, risposte e preview, eliminando i messaggi precedenti. ---
 @bot.on_message(filters.private & ~filters.command("start"))
 async def collect_data_handler(client, message: Message):
     user = message.from_user
-    if user.id not in user_data:
-        user_data[user.id] = {"user_messages_to_delete": []}
+    # Gestisci solo utenti con sessione attiva e categoria impostata
+    if user.id not in user_data or not user_data[user.id].get("category"):
+        return
     if "user_messages_to_delete" not in user_data[user.id]:
         user_data[user.id]["user_messages_to_delete"] = []
     user_data[user.id]["user_messages_to_delete"].append(message.id)
-    if user.id not in user_data:
-        return
     try:
         info = user_data[user.id]
         cat = info["category"]
@@ -94,42 +95,17 @@ async def collect_data_handler(client, message: Message):
             # --- GESTIONE MEDIA GROUP (più foto inviate insieme) ---
             # Se il messaggio fa parte di un media group e contiene foto
             if getattr(message, "media_group_id", None) and message.photo:
-                # Aggiungi tutte le foto del media group
                 for photo in message.photo if isinstance(message.photo, list) else [message.photo]:
-                    file_id = photo.file_id
-                    file_type = "photo"
-                    info["files"][label_text].append({"file_id": file_id, "file_type": file_type})
-                sent = await client.send_message(
-                    user.id,
-                    f"✅ {len(message.photo) if isinstance(message.photo, list) else 1} foto aggiunte ({len(info['files'][label_text])} totali). Invia altre foto o premi /done per continuare."
-                )
-                info["multi_file_temp_msgs"].append(sent.id)
+                    await add_file_and_confirm(client, user.id, info, label_text, photo.file_id, "photo")
                 return  # Non avanzare step finché non arriva /done
 
             # Se arriva una foto o documento singolo, aggiungilo alla lista
             if message.photo and not getattr(message, "media_group_id", None):
-                # Se è una foto singola (non media group)
-                if message.photo and not getattr(message, "media_group_id", None):
-                    file_id = message.photo.file_id
-                    file_type = "photo"
-                    info["files"][label_text].append({"file_id": file_id, "file_type": file_type})
-                    sent = await client.send_message(
-                        user.id,
-                        f"✅ File aggiunto ({len(info['files'][label_text])}). Invia altri file o premi /done per continuare."
-                    )
-                    info["multi_file_temp_msgs"].append(sent.id)
-                    return  # Non avanzare step finché non arriva /done
-                # Se è un documento
-                if message.document:
-                    file_id = message.document.file_id
-                    file_type = "document"
-                    info["files"][label_text].append({"file_id": file_id, "file_type": file_type})
-                    sent = await client.send_message(
-                        user.id,
-                        f"✅ File aggiunto ({len(info['files'][label_text])}). Invia altri file o premi /done per continuare."
-                    )
-                    info["multi_file_temp_msgs"].append(sent.id)
-                    return  # Non avanzare step finché non arriva /done
+                await add_file_and_confirm(client, user.id, info, label_text, message.photo.file_id, "photo")
+                return
+            if message.document:
+                await add_file_and_confirm(client, user.id, info, label_text, message.document.file_id, "document")
+                return
 
             # Se arriva testo diverso da /done, ignora o avvisa
             if message.text:
@@ -208,3 +184,48 @@ async def collect_data_handler(client, message: Message):
             user_data[user.id]["confirm_msg_id"] = confirm_msg.id
     except Exception as e:
         logging.exception(f"{YELLOW}Errore nella raccolta dei dati durante la compilazione dell'annuncio.{YELLOW}")
+        await cleanup_user_data_and_messages(client, user.id, reason="❗ Si è verificato un errore durante la compilazione dell'annuncio.")
+
+async def add_file_and_confirm(client, user_id, info, label_text, file_id, file_type):
+    info["files"][label_text].append({"file_id": file_id, "file_type": file_type})
+    sent = await client.send_message(
+        user_id,
+        f"✅ File aggiunto ({len(info['files'][label_text])}). Invia altri file o premi /done per continuare."
+    )
+    info["multi_file_temp_msgs"].append(sent.id)
+
+# --- Funzione di cleanup dati e messaggi utente ---
+async def cleanup_user_data_and_messages(client, user_id, reason=""):
+    info = user_data.get(user_id)
+    if not info:
+        return
+    # Cancella messaggi temporanei
+    for mid in info.get("messages_to_delete", []):
+        try:
+            await client.delete_messages(user_id, mid)
+        except Exception:
+            pass
+    for mid in info.get("multi_file_temp_msgs", []):
+        try:
+            await client.delete_messages(user_id, mid)
+        except Exception:
+            pass
+    for mid in info.get("user_messages_to_delete", []):
+        try:
+            await client.delete_messages(user_id, mid)
+        except Exception:
+            pass
+    # Rimuovi dati utente
+    user_data.pop(user_id, None)
+    # Avvisa l'utente e riporta al menu
+    msg = "⏱️ Tempo scaduto, i dati inseriti sono stati eliminati. Sei tornato al Menù."
+    if reason:
+        msg = f"{reason}\n\n{msg}"
+    await send_main_menu(client, user_id, msg)
+
+# --- Timeout automatico per la compilazione (3 minuti) ---
+async def start_compilation_timeout(client, user_id, announce_timeout):
+    await asyncio.sleep(announce_timeout)
+    # Cleanup solo se l'utente ha davvero iniziato la compilazione (ha una categoria)
+    if user_id in user_data and user_data[user_id].get("category"):
+        await cleanup_user_data_and_messages(client, user_id)

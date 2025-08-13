@@ -153,6 +153,9 @@ async def publish_announcement(client, user_id, info, pointer_ids):
         logging.info(f"{YELLOW}[ERRORE IN FASE DI PUBBLICAZIONE] l'Utente: {username} ha provato a pubblicare un annuncio ID {ann_id}, ma NON è stato riconosciuto il suo username. {RESET}")
     else:
         logging.info(f"{YELLOW}[ERRORE SCONOSCIUTO] l'Utente: {username} ha provato a pubblicare un annuncio ID {ann_id}, ma si è verificato un errore imprevisto. {RESET}")
+
+    # La cancellazione di user_data viene gestita dal button callback handler dopo tutte le operazioni
+
     return msg
 
 # --- Funzione per cancellare i messaggi precedenti dell'utente e inviare un nuovo messaggio pulito
