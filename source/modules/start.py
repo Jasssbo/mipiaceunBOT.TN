@@ -14,7 +14,7 @@ async def start_handler(client, message: Message):
     user = message.from_user
     username = user.username if user.username else user.first_name
     presente = await is_user_allowed_by_username(client, user)
-    logging.info(f"[START] Utente {username} ha avviato il bot. Presente nel gruppo: {presente}")
+    #logging.info(f"[START] Utente {username} ha avviato il bot. Presente nel gruppo: {presente}")
     if not presente:
         await message.reply("❌  Solo gli utenti presenti nel gruppo possono usare il bot. Assicurati di avere un @username pubblico (nel tuo profilo) e di essere nel gruppo (https://t.me/mipiaceunBOTTN).")
         return
@@ -34,6 +34,7 @@ async def start_handler(client, message: Message):
         [InlineKeyboardButton("📆 Evento", callback_data="new_event")],
         [InlineKeyboardButton("💼 Annuncio di Lavoro", callback_data="new_job")],
         [InlineKeyboardButton("💡 Call Pubblica per un Progetto", callback_data="new_project")],
-        [InlineKeyboardButton("👤 Il Tuo Profilo Lavorativo", callback_data="new_profile")]
+        [InlineKeyboardButton("👤 Il Tuo Profilo Lavorativo", callback_data="new_profile")],
+        [InlineKeyboardButton("🚨 Segnala utente", callback_data="report_user")]
     ])
     await send_clean_message(client, user.id, message.chat.id, "Benvenuto! Cosa vuoi pubblicare all'interno della Community?", buttons)

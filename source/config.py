@@ -1,3 +1,4 @@
+
 """
 Configurazione delle variabili principali del bot.
 Modifica questi valori per adattare il bot al tuo gruppo.
@@ -49,6 +50,9 @@ announce_timeout = 180 #in secondi
 
 # --- Dizionario per gestire lo stato e i dati di ogni utente ---
 user_data = {}
+
+# --- Dizionario per gestire lo stato e i dati di ogni segnalazione ---
+report_state = {}
 
 # --- DIZIONARIO DELLE DOMANDE ---
 # Contiene le domande per ogni categoria di annuncio. Ogni domanda ha un'etichetta e un'opzione per essere saltata.

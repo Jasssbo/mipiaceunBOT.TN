@@ -2,10 +2,39 @@
 Handler per tutte le interazioni con i bottoni InlineKeyboard.
 """
 import logging
+import asyncio
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from config import CATEGORY_QUESTIONS, user_data, bot, CHAT_ID, YELLOW, GREEN, RED, RESET, POINTER_MESSAGE_IDS, announce_timeout
+from config import CATEGORY_QUESTIONS, user_data, bot, CHAT_ID, YELLOW, GREEN, RED, RESET, POINTER_MESSAGE_IDS, announce_timeout, report_state
 from modules.user_announcements_interactions.announcement_compiler import send_clean_message, send_preview, update_preview_with_id, publish_announcement, is_user_allowed_by_username, safe_delete
 from modules.topic_guardian import is_user_allowed_by_username
+
+# Funzione per gestire il timeout della segnalazione
+async def async_timeout_report_state(client, user_id, timeout_seconds=300):
+    """
+    Funzione che gestisce il timeout della segnalazione. 
+    Dopo timeout_seconds secondi, se l'utente non ha completato la segnalazione,
+    il suo stato viene rimosso.
+    """
+    try:
+        await asyncio.sleep(timeout_seconds)
+        
+        # Verifica se l'utente è ancora nello stato di segnalazione
+        if user_id in report_state:
+            # Rimuove lo stato dell'utente
+            del report_state[user_id]
+            logging.info(f"[TIMEOUT] Stato di segnalazione rimosso per user_id={user_id} dopo {timeout_seconds} secondi")
+            
+            # Informa l'utente
+            try:
+                await client.send_message(
+                    user_id,
+                    "⏱ La procedura di segnalazione è scaduta per inattività.\n"
+                    "Per segnalare un utente, premi nuovamente il pulsante 'Segnala utente'."
+                )
+            except Exception as e:
+                logging.error(f"[TIMEOUT] Errore nell'invio del messaggio di timeout: {e}")
+    except Exception as e:
+        logging.error(f"[TIMEOUT] Errore nel task di timeout: {e}")
 
 # --- Funzione per inviare il menu principale all'utente ---
 async def send_main_menu(client, user_id, msg="🏠 Sei tornato al menù principale. Cosa vuoi pubblicare nella Community?"):
@@ -13,7 +42,8 @@ async def send_main_menu(client, user_id, msg="🏠 Sei tornato al menù princip
         [InlineKeyboardButton("📆 Evento", callback_data="new_event")],
         [InlineKeyboardButton("💼 Annuncio di Lavoro", callback_data="new_job")],
         [InlineKeyboardButton("💡 Call Pubblica per un Progetto", callback_data="new_project")],
-        [InlineKeyboardButton("👤 Il Tuo Profilo Lavorativo", callback_data="new_profile")]
+        [InlineKeyboardButton("👤 Il Tuo Profilo Lavorativo", callback_data="new_profile")],
+        [InlineKeyboardButton("🚨 Segnala utente", callback_data="report_user")]
     ])
     await send_clean_message(client, user_id, user_id, msg, buttons)
 
@@ -21,13 +51,67 @@ async def send_main_menu(client, user_id, msg="🏠 Sei tornato al menù princip
 # buttons_callback_handler: Gestisce tutte le interazioni con i bottoni InlineKeyboard, 
 # come la navigazione tra le domande, la conferma o l'annullamento della pubblicazione,
 # e il ritorno al menù principale. Ogni blocco gestisce un tipo di callback specifico.
+
 @bot.on_callback_query()
 async def buttons_callback_handler(client, callback_query: CallbackQuery):
-    uid = callback_query.from_user.id
-    # --- Controllo esistenza dati utente ---
-    data = callback_query.data
     user_id = callback_query.from_user.id
-    # Gestione eliminazione annuncio SEMPRE, anche senza sessione
+    uid = user_id
+    data = getattr(callback_query, 'data', None)
+    if data is None:
+        await callback_query.answer("❌ Errore interno: dati mancanti.", show_alert=True)
+        return
+
+    # --- Gestione segnalazione utente ---
+    if data == "report_user":
+        logging.info(f"[BUTTONS] Avvio procedura segnalazione per user_id={user_id}")
+        await callback_query.answer()
+        
+        # Crea un nuovo task per il timeout (senza importazione circolare)
+        # Gestiamo il timeout direttamente qui per evitare importazioni circolari
+        timeout_task = client.loop.create_task(async_timeout_report_state(client, user_id, 300))
+        
+        # Imposta lo stato e salva il task di timeout
+        report_state[user_id] = {
+            "step": "awaiting_username", 
+            "timeout_task": timeout_task
+        }
+        
+        # Invia istruzioni all'utente con un bottone per annullare
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ Annulla segnalazione", callback_data="cancel_report")]
+        ])
+        await client.send_message(
+            user_id, 
+            "🔎 Invia l'@username dell'utente che vuoi segnalare oppure inoltra un suo messaggio.\n"
+            "⏱️ Hai 5 minuti per completare la segnalazione.\n"
+            "❌ Puoi annullare in qualsiasi momento con /annulla o premendo il bottone qui sotto.",
+            reply_markup=buttons
+        )
+        return
+        
+    # --- Gestione annullamento segnalazione tramite bottone ---
+    if data == "cancel_report":
+        logging.info(f"[BUTTONS] Annullamento segnalazione tramite bottone per user_id={user_id}")
+        await callback_query.answer("Segnalazione annullata")
+        
+        # Verifica se l'utente è in stato di segnalazione
+        if user_id in report_state:
+            # Cancella il task di timeout se esiste
+            if "timeout_task" in report_state[user_id]:
+                try:
+                    report_state[user_id]["timeout_task"].cancel()
+                    logging.info(f"[BUTTONS] Task timeout cancellato per user_id={user_id}")
+                except Exception as e:
+                    logging.error(f"[BUTTONS] Errore nella cancellazione del timeout task: {str(e)}")
+            
+            # Rimuovi lo stato
+            report_state.pop(user_id, None)
+            
+            # Torna al menu principale
+            await send_main_menu(client, user_id, "❌ Segnalazione annullata. Sei tornato al menù principale.")
+        return
+
+    # --- Gestione eliminazione annuncio SEMPRE, anche senza sessione ---
     if data and data.startswith("delete_"):
         try:
             parts = data.split("_")
@@ -49,6 +133,7 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             logging.exception(f"{YELLOW}Errore imprevisto in fase di eliminazione dell'annuncio tramite bottone.{RESET}")
             await callback_query.answer("❌ Errore durante l'eliminazione.", show_alert=True)
         return
+
     # --- Ritorno al menù principale SEMPRE consentito ---
     if data == "back_to_menu":
         user = await client.get_users(user_id)
@@ -62,10 +147,12 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             user_data.pop(user_id, None)
         await send_main_menu(client, user_id)
         return
+
     # Se la sessione non esiste, gestisci solo le altre callback (ma NON il menu)
     if uid not in user_data:
         await callback_query.answer("Sessione scaduta o annuncio già gestito. Riavvia il Bot con /start", show_alert=True)
         return
+
     try:
         if data is None:
             logging.error(f"[BUTTONS] Callback senza data ricevuta da utente {uid}. Callback: {callback_query}")
@@ -276,4 +363,6 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
     except Exception as e:
         logging.exception(f"{YELLOW}Errore nel callback handler. Utente: {uid}, Data: {data}{RESET}")
         await send_clean_message(client, user_id, user_id, f"❌ Errore: {str(e)}")
+
+# La funzione timeout_report_state è stata spostata nel modulo report_user per migliorare la manutenibilità
 

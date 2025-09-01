@@ -1,5 +1,6 @@
 # Esclude il file con le credenziali
 bot_infos.env
+reports.json
 
 # Esclude la cartella di Pyrogram se esiste
 job_board_bot.session

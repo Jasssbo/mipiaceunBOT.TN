@@ -1,3 +1,4 @@
+
 """
 Punto di avvio del bot.
 Esegui questo file per avviare il bot.
@@ -21,7 +22,7 @@ from modules.user_announcements_interactions import announcement_compiler
 from modules.user_announcements_interactions.collect_data import collect_data_handler
 from modules.buttons import buttons_callback_handler
 from modules.topic_guardian import topic_guardian_handler
-
+from modules.user_announcements_interactions.report_user import report_user_handler, annulla_report_handler
 # ------------------------ AVVIO e ARRESTO BOT ------------------------
 # --- Avvio e arresto del bot Telegram ---
 if __name__ == "__main__":
