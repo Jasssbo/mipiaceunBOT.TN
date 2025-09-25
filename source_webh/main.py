@@ -5,7 +5,6 @@ Sostituisce bot.run() con un web server che riceve updates da Telegram.
 import os
 import sys
 import logging
-import json
 import asyncio
 from datetime import datetime
 from flask import Flask, request, jsonify
@@ -187,21 +186,9 @@ async def process_webhook_update(update_data):
     chiamare gli handler direttamente tramite il meccanismo di dispatch.
     """
     try:
-        # Il modo corretto per processare update in Pyrogram webhook:
-        # 1. Converti JSON in oggetto Update
-        from pyrogram.types import Update
-        
-        # Crea un oggetto Update dai dati JSON
-        update = Update._parse(bot, update_data, {})
-        
-        # 2. Processa l'update usando il sistema interno di Pyrogram
-        # Questo chiamerà automaticamente tutti gli handler registrati (@bot.on_message, @bot.on_callback_query, etc.)
-        if hasattr(bot, 'dispatcher') and hasattr(bot.dispatcher, 'updates_queue'):
-            # Aggiungi update alla coda del dispatcher
-            await bot.dispatcher.updates_queue.put(update)
-        else:
-            # Fallback: chiama direttamente il metodo di handling
-            await bot.handle_update(update)
+        # Pyrogram webhook: chiama direttamente il dispatcher interno
+        # Questo processerà automaticamente tutti gli handler registrati
+        await bot.handle_update(update_data)
         
         logging.info("[WEBHOOK] Update processato con successo")
         
