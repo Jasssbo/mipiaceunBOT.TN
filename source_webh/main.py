@@ -180,14 +180,11 @@ async def setup_webhook():
     logging.info("     -d 'url=https://your-app-name.onrender.com/webhook'")
     logging.info("💡 Sostituisci 'your-app-name' con il nome della tua app su Render")
 
-@app.before_first_request
-def __ensure_bot_started():
-    """Assicura l'avvio del bot nel contesto del worker di Gunicorn."""
-    start_bot_once()
-
 @app.route('/')
 def health_check():
     """Health check endpoint per Render."""
+    # Avvio lazy-safe nel worker
+    start_bot_once()
     logging.info(f"[HEALTH] Health check called - bot_ready={bot_ready}")
     status = {
         "status": "ok",
@@ -220,6 +217,7 @@ def webhook():
     Suggerimento: rimuovi il webhook con getWebhookInfo -> url vuoto.
     """
     try:
+        start_bot_once()
         # Log minimale per debug e indicazione operativa
         payload = request.get_json(silent=True) or {}
         keys = list(payload.keys())
@@ -236,6 +234,7 @@ def webhook():
 def stats():
     """Endpoint per statistiche Redis (per debug)."""
     try:
+        start_bot_once()
         if not storage:
             return jsonify({"error": "Storage non disponibile"}), 500
             
@@ -254,6 +253,7 @@ def stats():
 def reinit_bot():
     """Endpoint per re-inizializzare il bot in caso di problemi."""
     try:
+        start_bot_once()
         if loop and not loop.is_closed():
             # Schedula re-inizializzazione
             future = asyncio.run_coroutine_threadsafe(initialize_bot(), loop)
@@ -279,6 +279,7 @@ def send_test_message():
     Esempio: GET /send_test?secret=...&user_id=123456&text=Ciao
     """
     try:
+        start_bot_once()
         secret_required = os.getenv('SEND_TEST_SECRET')
         provided = request.args.get('secret') or request.values.get('secret')
         if secret_required and provided != secret_required:
