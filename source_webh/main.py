@@ -9,6 +9,7 @@ import asyncio
 from datetime import datetime
 from flask import Flask, request, jsonify
 from pyrogram.types import Update
+from pyrogram import filters
 from threading import Thread
 
 # Importa l'istanza del bot dal modulo di configurazione
@@ -46,20 +47,35 @@ app = Flask(__name__)
 loop = None
 bot_ready = False
 
+# Catch‑all debug handler per verificare che il dispatcher riceva gli update
+@bot.on_message()
+async def __debug_any_message(client, message):
+    try:
+        uid = getattr(getattr(message, "from_user", None), "id", None)
+        txt = getattr(message, "text", None)
+        cid = getattr(getattr(message, "chat", None), "id", None)
+        logging.info(f"[DEBUG HANDLER] on_message fired: user={uid} chat={cid} text={txt}")
+        # Comando di test non invasivo
+        if txt and txt.strip().lower() == "/ping":
+            await message.reply("pong")
+    except Exception as e:
+        logging.exception(f"[DEBUG HANDLER] error: {e}")
+
 async def initialize_bot():
     """Inizializza il bot senza avviare polling."""
     global bot_ready
     try:
         await bot.start()
+        me = await bot.get_me()
         bot_ready = True
-        logging.info("🤖 Bot inizializzato con successo per webhook")
-        
+        logging.info(f"🤖 Bot connesso: @{getattr(me, 'username', None)} (id={getattr(me, 'id', None)})")
+
         # Health check Redis
         if storage.health_check():
             logging.info("✅ Redis connection healthy")
         else:
             logging.warning("⚠️ Redis connection issues")
-            
+
     except Exception as e:
         logging.error(f"❌ Errore inizializzazione bot: {e}")
         bot_ready = False
@@ -100,11 +116,8 @@ def init_on_import():
 init_on_import()
 
 def setup_event_loop():
-    """Setup event loop per operazioni async in thread separato."""
-    global loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_forever()
+    """Deprecated: l'event loop viene creato in init_on_import()."""
+    pass
 
 # initialize_bot spostata prima di init_on_import
 
@@ -159,17 +172,26 @@ def webhook():
         logging.info(f"[WEBHOOK] Ricevuto update tipo: {update_type}")
         
         # Processa l'update direttamente con i dati JSON
-        # Non è necessario convertire in oggetto Update, Pyrogram lo fa internamente
+        # Pyrogram può gestire l'array di update tramite handle_updates
         if loop and not loop.is_closed():
-            # Schedula task nell'event loop con i dati JSON originali
-            asyncio.run_coroutine_threadsafe(
-                process_webhook_update(update_data), 
+            future = asyncio.run_coroutine_threadsafe(
+                process_webhook_update(update_data),
                 loop
             )
+            def _done(f):
+                try:
+                    f.result()
+                    logging.info("[WEBHOOK] process_webhook_update completato")
+                except Exception as ex:
+                    logging.exception(f"[WEBHOOK] process_webhook_update FAILED: {ex}")
+            try:
+                future.add_done_callback(_done)
+            except Exception:
+                pass
         else:
             logging.error("[WEBHOOK] Event loop non disponibile")
             return jsonify({"status": "loop_error"}), 200
-        
+
         return jsonify({"status": "ok"}), 200
         
     except Exception as e:
@@ -179,34 +201,23 @@ def webhook():
 
 async def process_webhook_update(update_data):
     """
-    Processa un update webhook usando il metodo CORRETTO di Pyrogram.
-    
-    IMPORTANTE: Pyrogram non ha bot.dispatcher.process_update()!
-    Il modo corretto è convertire i dati JSON in oggetti Pyrogram e 
-    chiamare gli handler direttamente tramite il meccanismo di dispatch.
+    Processa un update webhook passando i dati al dispatcher di Pyrogram.
     """
-    try:
-        # Pyrogram webhook: chiama direttamente il dispatcher interno
-        # Questo processerà automaticamente tutti gli handler registrati
-        await bot.handle_updates([update_data])
-        
-        logging.info("[WEBHOOK] Update processato con successo")
-        
-    except Exception as e:
-        logging.exception(f"[WEBHOOK] Errore processamento update: {e}")
-        
-        # Log dettagli per debug
-        try:
-            if "message" in update_data:
-                from_user = update_data.get("message", {}).get("from", {})
-                user_id = from_user.get("id") if from_user else None
-                logging.error(f"[WEBHOOK] Update da user_id: {user_id}")
-            elif "callback_query" in update_data:
-                from_user = update_data.get("callback_query", {}).get("from", {})
-                user_id = from_user.get("id") if from_user else None
-                logging.error(f"[WEBHOOK] Callback da user_id: {user_id}")
-        except:
-            pass
+    # Log minimo sul contenuto per capire il routing
+    msg = update_data.get("message") or update_data.get("edited_message")
+    cb = update_data.get("callback_query")
+    uid = None
+    txt = None
+    if msg:
+        uid = (msg.get("from") or {}).get("id")
+        txt = msg.get("text")
+    elif cb:
+        uid = (cb.get("from") or {}).get("id")
+        txt = (cb.get("data") or "<cb>")
+    logging.info(f"[WEBHOOK] Dispatching update: user={uid} text={txt} keys={list(update_data.keys())}")
+
+    # Passa l'update a Pyrogram
+    await bot.handle_updates([update_data])
 
 @app.route('/stats')
 def stats():
@@ -260,23 +271,12 @@ def internal_error(error):
 
 def main():
     """Funzione principale per avvio webhook server."""
-    global loop
-    
-    logging.info("🚀 Avvio webhook server...")
-    
-    # Setup event loop in thread separato
-    loop_thread = Thread(target=setup_event_loop, daemon=True)
-    loop_thread.start()
-    
-    # Aspetta che l'event loop sia pronto
-    import time
-    time.sleep(1)
-    
-    # Il bot è già inizializzato da init_on_import()
-    
-    # Setup webhook info
+    logging.info("🚀 Avvio webhook server (DEV mode)...")
+    # Il bot e l'event loop sono già inizializzati da init_on_import()
+    # Setup webhook info (solo log informativo)
     try:
-        asyncio.run_coroutine_threadsafe(setup_webhook(), loop).result(timeout=10)
+        if loop:
+            asyncio.run_coroutine_threadsafe(setup_webhook(), loop).result(timeout=10)
     except Exception as e:
         logging.warning(f"⚠️ Setup webhook info fallito: {e}")
     
