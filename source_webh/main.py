@@ -270,15 +270,25 @@ def main():
     
     logging.info(f"🌐 Server in ascolto su {host}:{port}")
     
-    # In produzione usa un WSGI server, per dev va bene Flask built-in
-    debug_mode = os.environ.get("FLASK_DEBUG", "False").lower() == "true"
+    # Determina se siamo in produzione o sviluppo
+    is_production = os.environ.get("RENDER") is not None or os.environ.get("RAILWAY") is not None
     
-    app.run(
-        host=host,
-        port=port,
-        debug=debug_mode,
-        threaded=True
-    )
+    if is_production:
+        # PRODUZIONE: Usa Gunicorn tramite start command su Render
+        logging.info("🏭 Modalità produzione - server avviato tramite Gunicorn")
+        # Non chiamare app.run() in produzione, Gunicorn gestisce tutto
+        logging.info("✅ Applicazione pronta per Gunicorn")
+    else:
+        # SVILUPPO: Usa Flask dev server
+        debug_mode = os.environ.get("FLASK_DEBUG", "true").lower() == "true"
+        logging.info("🛠️ Modalità sviluppo - usando Flask dev server")
+        
+        app.run(
+            host=host,
+            port=port,
+            debug=debug_mode,
+            threaded=True
+        )
 
 if __name__ == "__main__":
     main()

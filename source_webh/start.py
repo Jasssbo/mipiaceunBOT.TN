@@ -31,12 +31,19 @@ print("✅ All environment variables found")
 print(f"📡 Redis URL: {os.getenv('REDIS_URL')[:50]}...")
 print(f"🤖 Bot Token: {os.getenv('BOT_TOKEN')[:20]}...")
 
-# Avvia l'applicazione Flask con inizializzazione bot
-from main import main as start_webhook_server
+# Determina se usare Gunicorn (produzione) o Flask dev server
+is_production = os.getenv("RENDER") is not None
 
-if __name__ == "__main__":
-    # Su Render, usa la porta fornita dal sistema
-    os.environ.setdefault("PORT", "5000")
+if is_production:
+    print("🏭 Produzione: Avvio con Gunicorn")
+    # Su Render, usa Gunicorn per produzione
+    port = os.getenv("PORT", "5000")
+    workers = os.getenv("WEB_CONCURRENCY", "2")
     
-    print("🚀 Starting webhook server on Render...")
+    # Avvia Gunicorn
+    os.system(f"gunicorn --bind 0.0.0.0:{port} --workers {workers} --timeout 120 --keep-alive 2 --log-level info wsgi:application")
+else:
+    print("�️ Sviluppo: Avvio con Flask dev server")
+    # Sviluppo locale: usa Flask dev server
+    from main import main as start_webhook_server
     start_webhook_server()
