@@ -6,6 +6,7 @@ import os
 import sys
 import logging
 import asyncio
+from threading import Thread, Lock
 import requests
 from datetime import datetime
 from flask import Flask, request, jsonify
@@ -42,7 +43,10 @@ app = Flask(__name__)
 
 # Global event loop per gestire operazioni async
 loop = None
+loop_thread = None
 bot_ready = False
+_startup_lock = Lock()
+_startup_done = False
 
 # Debug ping handler (specific, non-conflicting)
 @bot.on_message(filters.command("ping") & filters.private)
@@ -55,6 +59,15 @@ async def ping_handler(client, message):
         await message.reply("🏓 pong - bot is alive!")
     except Exception as e:
         logging.exception(f"[PING] error: {e}")
+
+# Opzionale: echo di debug per QUALSIASI DM testuale (abilita con env DEBUG_ECHO=true)
+if os.getenv("DEBUG_ECHO", "false").lower() == "true":
+    @bot.on_message(filters.private & filters.text & ~filters.command, group=98)
+    async def __debug_echo(client, message):
+        try:
+            await message.reply(f"🔊 Echo di debug: {message.text[:200]}")
+        except Exception as e:
+            logging.exception(f"[DEBUG ECHO] error: {e}")
 
 async def initialize_bot():
     """Inizializza il bot senza avviare polling."""
@@ -115,40 +128,41 @@ async def keep_alive_task():
             logging.info("🛑 Keep-alive task cancelled")
             break
 
-# Inizializza subito l'event loop e il bot quando il modulo viene importato
-# Questo funziona sia con Gunicorn che con Flask dev server
-def init_on_import():
-    """Inizializza bot quando il modulo viene importato."""
-    global loop, bot_ready
-    
-    if loop is None:  # Evita inizializzazione multipla
-        import asyncio
-        from threading import Thread
+def start_bot_once():
+    """Avvia l'event loop e inizializza il bot una sola volta in modo thread-safe."""
+    global loop, loop_thread, _startup_done
+    if _startup_done:
+        return
+    with _startup_lock:
+        if _startup_done:
+            return
         
-        # Avvia event loop in thread separato
         def start_loop():
             global loop
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             loop.run_forever()
-            
+
         loop_thread = Thread(target=start_loop, daemon=True)
         loop_thread.start()
-        
-        # Aspetta che l'event loop sia pronto
-        import time
-        time.sleep(1)
-        
-        # Inizializza bot
-        if loop:
-            try:
-                future = asyncio.run_coroutine_threadsafe(initialize_bot(), loop)
-                future.result(timeout=30)
-            except Exception as e:
-                logging.error(f"❌ Errore inizializzazione bot: {e}")
 
-# Chiama inizializzazione
-init_on_import()
+        # Attendi che l'event loop sia pronto
+        import time
+        for _ in range(20):
+            if loop is not None:
+                break
+            time.sleep(0.1)
+
+        if loop is None:
+            logging.critical("Impossibile avviare l'event loop")
+            return
+
+        try:
+            fut = asyncio.run_coroutine_threadsafe(initialize_bot(), loop)
+            fut.result(timeout=30)
+            _startup_done = True
+        except Exception as e:
+            logging.error(f"❌ Errore inizializzazione bot: {e}")
 
 def setup_event_loop():
     """Deprecated: l'event loop viene creato in init_on_import()."""
@@ -165,6 +179,11 @@ async def setup_webhook():
     logging.info(f"curl -X POST 'https://api.telegram.org/bot{os.getenv('BOT_TOKEN', '<BOT_TOKEN>')}/setWebhook' \\")
     logging.info("     -d 'url=https://your-app-name.onrender.com/webhook'")
     logging.info("💡 Sostituisci 'your-app-name' con il nome della tua app su Render")
+
+@app.before_first_request
+def __ensure_bot_started():
+    """Assicura l'avvio del bot nel contesto del worker di Gunicorn."""
+    start_bot_once()
 
 @app.route('/')
 def health_check():
@@ -252,6 +271,42 @@ def reinit_bot():
         logging.exception(f"[REINIT] Errore re-inizializzazione: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/send_test', methods=['POST', 'GET'])
+def send_test_message():
+    """Invia un DM di prova a uno user_id per verificare che il bot riesca a spedire messaggi.
+    Protezione semplice: richiede un segreto in query/body ?secret=...
+    Imposta SEND_TEST_SECRET nelle variabili di ambiente su Render e passa lo stesso valore qui.
+    Esempio: GET /send_test?secret=...&user_id=123456&text=Ciao
+    """
+    try:
+        secret_required = os.getenv('SEND_TEST_SECRET')
+        provided = request.args.get('secret') or request.values.get('secret')
+        if secret_required and provided != secret_required:
+            return jsonify({"error": "Unauthorized"}), 401
+
+        user_id = request.args.get('user_id') or request.values.get('user_id')
+        text = request.args.get('text') or request.values.get('text') or "Test dal bot"
+        if not user_id:
+            return jsonify({"error": "Param user_id mancante"}), 400
+        try:
+            user_id = int(user_id)
+        except ValueError:
+            return jsonify({"error": "user_id non valido"}), 400
+
+        if not loop or loop.is_closed():
+            return jsonify({"error": "Event loop non disponibile"}), 500
+
+        fut = asyncio.run_coroutine_threadsafe(bot.send_message(user_id, text), loop)
+        msg = fut.result(timeout=15)
+        return jsonify({
+            "status": "sent",
+            "chat_id": msg.chat.id if msg else None,
+            "message_id": msg.id if msg else None
+        })
+    except Exception as e:
+        logging.exception(f"[SEND_TEST] errore invio: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.errorhandler(404)
 def not_found(error):
     """Handler per 404."""
@@ -269,6 +324,8 @@ def main():
     # Il bot e l'event loop sono già inizializzati da init_on_import()
     # Setup webhook info (solo log informativo)
     try:
+        # In dev, assicura avvio bot subito
+        start_bot_once()
         if loop:
             asyncio.run_coroutine_threadsafe(setup_webhook(), loop).result(timeout=10)
     except Exception as e:
@@ -280,9 +337,7 @@ def main():
         host = os.environ.get("HOST", "0.0.0.0")
         # Forza debug off per evitare riavvii del reloader in locale
         debug_mode = False
-
         logging.info(f"🌐 Avvio Flask DEV server su {host}:{port} (debug={debug_mode})")
-
         app.run(
             host=host,
             port=port,
