@@ -90,8 +90,10 @@ def get_report_state(user_id: int) -> dict:
     """Get user report state (compatibility wrapper)."""
     return get_storage().get_report_state(user_id) or {}
 
-def set_report_state(user_id: int, data: dict) -> bool:
+def set_report_state(user_id: int, data: dict, ttl: int | None = None) -> bool:
     """Set user report state (compatibility wrapper)."""
+    if ttl is not None:
+        return get_storage().set_report_state(user_id, data, ttl=ttl)
     return get_storage().set_report_state(user_id, data)
 
 def delete_report_state(user_id: int) -> bool:

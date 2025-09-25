@@ -8,9 +8,6 @@ import logging
 import asyncio
 from datetime import datetime
 from flask import Flask, request, jsonify
-from pyrogram.types import Update
-from pyrogram import filters
-from threading import Thread
 
 # Importa l'istanza del bot dal modulo di configurazione
 from config import bot, storage
@@ -145,79 +142,23 @@ def health_check():
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """
-    Endpoint principale webhook che riceve updates da Telegram.
-    Deve sempre ritornare HTTP 200 per evitare retry di Telegram.
+    Endpoint chiamato da Telegram quando è configurato un Bot API webhook.
+    In questa architettura Pyrogram riceve gli update tramite la sua connessione, non dal webhook.
+    Quindi qui ignoriamo il payload e rispondiamo 200 per evitare retry.
+    Suggerimento: rimuovi il webhook con getWebhookInfo -> url vuoto.
     """
     try:
-        # Verifica che il bot sia pronto
-        if not bot_ready:
-            logging.warning("[WEBHOOK] Bot non ancora pronto, ignoro update")
-            return jsonify({"status": "bot_not_ready"}), 200
-        
-        # Ottieni dati JSON dalla richiesta
-        update_data = request.get_json()
-        if not update_data:
-            logging.warning("[WEBHOOK] Nessun dato JSON ricevuto")
-            return jsonify({"status": "no_data"}), 200
-        
-        # Log dell'update ricevuto (senza dati sensibili)
-        update_type = "unknown"
-        if "message" in update_data:
-            update_type = "message"
-        elif "callback_query" in update_data:
-            update_type = "callback_query"
-        elif "edited_message" in update_data:
-            update_type = "edited_message"
-            
-        logging.info(f"[WEBHOOK] Ricevuto update tipo: {update_type}")
-        
-        # Processa l'update direttamente con i dati JSON
-        # Pyrogram può gestire l'array di update tramite handle_updates
-        if loop and not loop.is_closed():
-            future = asyncio.run_coroutine_threadsafe(
-                process_webhook_update(update_data),
-                loop
-            )
-            def _done(f):
-                try:
-                    f.result()
-                    logging.info("[WEBHOOK] process_webhook_update completato")
-                except Exception as ex:
-                    logging.exception(f"[WEBHOOK] process_webhook_update FAILED: {ex}")
-            try:
-                future.add_done_callback(_done)
-            except Exception:
-                pass
-        else:
-            logging.error("[WEBHOOK] Event loop non disponibile")
-            return jsonify({"status": "loop_error"}), 200
-
-        return jsonify({"status": "ok"}), 200
-        
+        # Log minimale per debug e indicazione operativa
+        payload = request.get_json(silent=True) or {}
+        keys = list(payload.keys())
+        logging.info(f"[WEBHOOK] Chiamata ricevuta e ignorata. keys={keys}")
+        return jsonify({
+            "status": "ignored",
+            "hint": "Questo bot usa Pyrogram (no Bot API webhook). Esegui deleteWebhook e assicurati che getWebhookInfo sia vuoto.",
+        }), 200
     except Exception as e:
-        # Log errore ma ritorna sempre 200
-        logging.exception(f"[WEBHOOK] Errore critico: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 200
-
-async def process_webhook_update(update_data):
-    """
-    Processa un update webhook passando i dati al dispatcher di Pyrogram.
-    """
-    # Log minimo sul contenuto per capire il routing
-    msg = update_data.get("message") or update_data.get("edited_message")
-    cb = update_data.get("callback_query")
-    uid = None
-    txt = None
-    if msg:
-        uid = (msg.get("from") or {}).get("id")
-        txt = msg.get("text")
-    elif cb:
-        uid = (cb.get("from") or {}).get("id")
-        txt = (cb.get("data") or "<cb>")
-    logging.info(f"[WEBHOOK] Dispatching update: user={uid} text={txt} keys={list(update_data.keys())}")
-
-    # Passa l'update a Pyrogram
-    await bot.handle_updates([update_data])
+        logging.exception(f"[WEBHOOK] Errore inatteso: {e}")
+        return jsonify({"status": "ignored", "error": str(e)}), 200
 
 @app.route('/stats')
 def stats():

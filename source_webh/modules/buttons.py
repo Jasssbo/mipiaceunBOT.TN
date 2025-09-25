@@ -9,7 +9,7 @@ from config import (CATEGORY_QUESTIONS, bot, CHAT_ID, YELLOW, GREEN, RED, RESET,
                    delete_user_data, get_report_state, set_report_state, delete_report_state)
 from modules.user_announcements_interactions.announcement_compiler import (
     send_clean_message, send_preview, update_preview_with_id, publish_announcement, 
-    is_user_allowed_by_username, safe_delete, build_announcement_text
+    safe_delete, build_announcement_text
 )
 from modules.topic_guardian import is_user_allowed_by_username
 
