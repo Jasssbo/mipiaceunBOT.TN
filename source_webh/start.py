@@ -22,8 +22,7 @@ except ImportError:
 def check_required_env():
     """Verifica che le variabili obbligatorie siano definite"""
     required = [
-        "API_ID", "API_HASH", "BOT_TOKEN", "CHANNEL_ID", 
-        "ADMIN_ID", "REDIS_URL", "WEBHOOK_URL"
+        "API_ID", "API_HASH", "BOT_TOKEN", "REDIS_URL"
     ]
     
     missing = []
