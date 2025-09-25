@@ -7,6 +7,7 @@ import asyncio
 import logging
 from dotenv import load_dotenv
 from pyrogram import Client
+import requests
 
 # Carica variabili ambiente
 load_dotenv("bot_infos_webh.env")
@@ -38,42 +39,39 @@ async def check_webhook_status():
         print(f"🤖 Bot: @{me.username} (ID: {me.id})")
         
         # Controlla webhook usando HTTP API (Pyrogram non ha get_webhook_info)
-        import aiohttp
-        async with aiohttp.ClientSession() as session:
-            webhook_url = f"https://api.telegram.org/bot{BOT_TOKEN}/getWebhookInfo"
-            async with session.get(webhook_url) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    if data.get('ok'):
-                        result = data.get('result', {})
-                        webhook_url = result.get('url', '')
-                        pending_updates = result.get('pending_update_count', 0)
-                        
-                        print(f"📡 Webhook URL: {webhook_url or 'NESSUNO (✅ CORRETTO)'}")
-                        print(f"📊 Updates in coda: {pending_updates}")
-                        
-                        if webhook_url:
-                            print("\n⚠️  PROBLEMA TROVATO!")
-                            print("Il webhook è ancora attivo. Questo impedisce a Pyrogram di ricevere i messaggi.")
-                            print("\n🔧 SOLUZIONE - Rimozione automatica...")
-                            
-                            # Prova a rimuovere automaticamente
-                            delete_url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook"
-                            async with session.post(delete_url) as del_response:
-                                if del_response.status == 200:
-                                    del_data = await del_response.json()
-                                    if del_data.get('ok'):
-                                        print("✅ Webhook rimosso automaticamente!")
-                                    else:
-                                        print(f"❌ Rimozione webhook fallita: {del_data}")
-                                else:
-                                    print(f"❌ Errore HTTP rimozione webhook: {del_response.status}")
+        webhook_url = f"https://api.telegram.org/bot{BOT_TOKEN}/getWebhookInfo"
+        resp = requests.get(webhook_url, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get('ok'):
+                result = data.get('result', {})
+                url = result.get('url', '')
+                pending_updates = result.get('pending_update_count', 0)
+
+                print(f"📡 Webhook URL: {url or 'NESSUNO (✅ CORRETTO)'}")
+                print(f"📊 Updates in coda: {pending_updates}")
+
+                if url:
+                    print("\n⚠️  PROBLEMA TROVATO!")
+                    print("Il webhook è ancora attivo. Questo impedisce a Pyrogram di ricevere i messaggi.")
+                    print("\n🔧 SOLUZIONE - Rimozione automatica...")
+
+                    delete_url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook"
+                    del_resp = requests.post(delete_url, timeout=15)
+                    if del_resp.status_code == 200:
+                        del_data = del_resp.json()
+                        if del_data.get('ok'):
+                            print("✅ Webhook rimosso automaticamente!")
                         else:
-                            print("✅ Configurazione webhook corretta per Pyrogram")
+                            print(f"❌ Rimozione webhook fallita: {del_data}")
                     else:
-                        print(f"❌ Errore API: {data}")
+                        print(f"❌ Errore HTTP rimozione webhook: {del_resp.status_code}")
                 else:
-                    print(f"❌ Errore HTTP: {response.status}")
+                    print("✅ Configurazione webhook corretta per Pyrogram")
+            else:
+                print(f"❌ Errore API: {data}")
+        else:
+            print(f"❌ Errore HTTP: {resp.status_code}")
         
     except Exception as e:
         print(f"❌ Errore: {e}")
