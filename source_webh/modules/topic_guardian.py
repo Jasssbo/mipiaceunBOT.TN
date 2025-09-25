@@ -67,33 +67,23 @@ async def topic_guardian_handler(client, message: Message):
     logging.info(f"[TOPIC GUARDIAN] Messaggio in topic non gestito: {topic_id}, nessuna azione.")
 
     
-# --- Funzione per verificare se l'utente è presente nel gruppo tramite username ---
+# --- Funzione per verificare se l'utente è presente nel gruppo (compatibile Bot API) ---
 async def is_user_allowed_by_username(client, user):
     """
-    Controlla se l'utente (tramite username) è presente tra i membri del gruppo.
-    Utile per gestire utenti con username pubblico e verificare la presenza reale.
-    Logga il tentativo di interazione.
-    
-    In versione webhook: stessa logica, nessun cambiamento necessario.
+    Verifica la presenza usando get_chat_member (Bot API), più affidabile dei dump completi.
+    Considera ammessi gli utenti con status non in {left, kicked}. Gestisce eccezioni loggando.
     """
     try:
-        usernames = set()
-        async for member in client.get_chat_members(CHAT_ID):
-            if member.user.username:
-                usernames.add(member.user.username.lower())
-        
-        # Log solo username utente e presenza
-        username = user.username if user.username else user.first_name
-        presente = user.username and user.username.lower() in usernames
-        
-        if presente is True:
-            logging.info(f"[{GREEN}START CHECK] L'Utente: {username} E' Presente nel gruppo{RESET}")
-        elif presente is False:
-            logging.info(f"[{RED}START CHECK] L'Utente: {username} NON E' Presente nel gruppo{RESET}")
+        member = await client.get_chat_member(CHAT_ID, user.id)
+        status = getattr(member, "status", None) or getattr(member, "status", "member")
+        allowed = status not in ("left", "kicked")
+        username = user.username if getattr(user, "username", None) else user.first_name
+        if allowed:
+            logging.info(f"[{GREEN}START CHECK] Utente {username} è nel gruppo (status={status}){RESET}")
         else:
-            logging.info(f"[{YELLOW}START CHECK] L'Utente: {username} provando a iniziare il bot, ha generato un errore imprevisto.{RESET}")
-        
-        return presente
+            logging.info(f"[{RED}START CHECK] Utente {username} NON è nel gruppo (status={status}){RESET}")
+        return allowed
     except Exception as e:
-        logging.exception(f"{YELLOW}Errore durante il controllo dell'username nel gruppo.{RESET}")
+        username = user.username if getattr(user, "username", None) else user.first_name
+        logging.warning(f"[{YELLOW}START CHECK] get_chat_member fallita per {username}: {e}{RESET}")
         return False
