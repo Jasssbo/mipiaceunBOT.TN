@@ -23,5 +23,8 @@ redis==4.6.0
 # WSGI server per produzione (opzionale)
 gunicorn==21.2.0
 
+# HTTP client (portable, no C extensions)
+requests==2.32.3
+
 # HTTP client per keep-alive
 aiohttp==3.8.6

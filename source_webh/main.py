@@ -6,13 +6,16 @@ import os
 import sys
 import logging
 import asyncio
-import aiohttp
+import requests
 from datetime import datetime
 from flask import Flask, request, jsonify
 from pyrogram import filters
 
 # Importa l'istanza del bot dal modulo di configurazione
 from config import bot, storage
+
+# Identità del bot (riempita a runtime)
+bot_identity = {"username": None, "id": None}
 
 # IMPORTANTE: Importa tutti i moduli che registrano handler
 # Questo è necessario per far funzionare il bot in modalità webhook
@@ -59,6 +62,12 @@ async def initialize_bot():
     try:
         await bot.start()
         me = await bot.get_me()
+        # Salva identità bot per debug/health
+        try:
+            bot_identity["username"] = getattr(me, 'username', None)
+            bot_identity["id"] = getattr(me, 'id', None)
+        except Exception:
+            pass
         bot_ready = True
         logging.info(f"🤖 Bot connesso: @{getattr(me, 'username', None)} (id={getattr(me, 'id', None)})")
 
@@ -74,9 +83,10 @@ async def initialize_bot():
         else:
             logging.warning("⚠️ Redis connection issues")
 
-        # Start keep-alive task on Render (better environment detection)
+        # Start keep-alive task on Render (better environment detection + guard flag)
         render_external_url = os.getenv('RENDER_EXTERNAL_URL')
-        if render_external_url or os.getenv('RENDER_SERVICE_ID'):
+        keep_alive_enabled = os.getenv('KEEP_ALIVE', 'true').lower() == 'true'
+        if keep_alive_enabled and (render_external_url or os.getenv('RENDER_SERVICE_ID')):
             # Schedule task in the correct event loop
             current_loop = asyncio.get_event_loop()
             current_loop.create_task(keep_alive_task())
@@ -89,16 +99,16 @@ async def initialize_bot():
 async def keep_alive_task():
     """Keep the service alive by making HTTP requests to itself every 4 minutes."""
     render_url = os.getenv('RENDER_EXTERNAL_URL', 'https://mipiaceunbot-tn.onrender.com')
+    session = requests.Session()
     
     while True:
         try:
             await asyncio.sleep(240)  # 4 minutes
-            async with aiohttp.ClientSession() as session:
-                async with session.get(f"{render_url}/", timeout=30) as response:
-                    if response.status == 200:
-                        logging.info("🔄 Keep-alive ping successful")
-                    else:
-                        logging.warning(f"⚠️ Keep-alive ping failed: {response.status}")
+            resp = session.get(f"{render_url}/", timeout=15)
+            if resp.status_code == 200:
+                logging.info("🔄 Keep-alive ping successful")
+            else:
+                logging.warning(f"⚠️ Keep-alive ping failed: {resp.status_code}")
         except Exception as e:
             logging.error(f"❌ Keep-alive ping error: {e}")
         except asyncio.CancelledError:
@@ -165,9 +175,22 @@ def health_check():
         "bot_ready": bot_ready,
         "redis_health": storage.health_check() if storage else False,
         "timestamp": datetime.now().isoformat(),
+        "bot_username": bot_identity.get("username"),
+        "bot_id": bot_identity.get("id"),
         "message": "Send /ping to bot for test" if bot_ready else "Bot initializing..."
     }
     return jsonify(status)
+
+# Logger non invasivo per DM: non risponde, solo logga, per verificare che arrivino gli update
+@bot.on_message(filters.private, group=99)
+async def __debug_private_log(client, message):
+    try:
+        uid = getattr(getattr(message, "from_user", None), "id", None)
+        uname = getattr(getattr(message, "from_user", None), "username", None)
+        txt = getattr(message, "text", None)
+        logging.info(f"[DEBUG DM] incoming: user={uid} (@{uname}) text='{txt}'")
+    except Exception as e:
+        logging.exception(f"[DEBUG DM] error: {e}")
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -255,15 +278,17 @@ def main():
     if not os.environ.get('SERVER_SOFTWARE', '').startswith('gunicorn'):
         port = int(os.environ.get("PORT", 5000))
         host = os.environ.get("HOST", "0.0.0.0")
-        debug_mode = os.environ.get("FLASK_DEBUG", "true").lower() == "true"
-        
+        # Forza debug off per evitare riavvii del reloader in locale
+        debug_mode = False
+
         logging.info(f"🌐 Avvio Flask DEV server su {host}:{port} (debug={debug_mode})")
-        
+
         app.run(
             host=host,
             port=port,
             debug=debug_mode,
-            threaded=True
+            threaded=True,
+            use_reloader=False
         )
     else:
         logging.info("🏭 Sotto Gunicorn - Flask DEV server non avviato")
