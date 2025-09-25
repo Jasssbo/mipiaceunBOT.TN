@@ -51,12 +51,23 @@ async def __debug_any_message(client, message):
         uid = getattr(getattr(message, "from_user", None), "id", None)
         txt = getattr(message, "text", None)
         cid = getattr(getattr(message, "chat", None), "id", None)
-        logging.info(f"[DEBUG HANDLER] on_message fired: user={uid} chat={cid} text={txt}")
+        username = getattr(getattr(message, "from_user", None), "username", None)
+        logging.info(f"[🔥 DEBUG HANDLER] on_message fired: user={uid} (@{username}) chat={cid} text='{txt}'")
         # Comando di test non invasivo
         if txt and txt.strip().lower() == "/ping":
-            await message.reply("pong")
+            await message.reply("🏓 pong - bot is alive!")
     except Exception as e:
         logging.exception(f"[DEBUG HANDLER] error: {e}")
+
+# Debug callback query handler
+@bot.on_callback_query()
+async def __debug_callback(client, callback_query):
+    try:
+        uid = getattr(getattr(callback_query, "from_user", None), "id", None)
+        data = getattr(callback_query, "data", None)
+        logging.info(f"[🔥 DEBUG CALLBACK] callback_query fired: user={uid} data='{data}'")
+    except Exception as e:
+        logging.exception(f"[DEBUG CALLBACK] error: {e}")
 
 async def initialize_bot():
     """Inizializza il bot senza avviare polling."""
@@ -66,6 +77,12 @@ async def initialize_bot():
         me = await bot.get_me()
         bot_ready = True
         logging.info(f"🤖 Bot connesso: @{getattr(me, 'username', None)} (id={getattr(me, 'id', None)})")
+
+        # Note: Pyrogram non ha get_webhook_info (è Bot API)
+        # Se hai webhook attivo, rimuovilo manualmente con:
+        # curl -X POST 'https://api.telegram.org/bot<TOKEN>/deleteWebhook'
+        logging.info("💡 Se il bot non risponde, verifica che non ci sia un webhook attivo")
+        logging.info("💡 Comando: curl -X POST 'https://api.telegram.org/bot<TOKEN>/deleteWebhook'")
 
         # Health check Redis
         if storage.health_check():
@@ -131,11 +148,13 @@ async def setup_webhook():
 @app.route('/')
 def health_check():
     """Health check endpoint per Render."""
+    logging.info(f"[HEALTH] Health check called - bot_ready={bot_ready}")
     status = {
         "status": "ok",
         "bot_ready": bot_ready,
         "redis_health": storage.health_check() if storage else False,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "message": "Send /ping to bot for test" if bot_ready else "Bot initializing..."
     }
     return jsonify(status)
 
