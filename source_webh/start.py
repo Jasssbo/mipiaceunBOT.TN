@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Avvio per deployment su Render.com
+Entry point per bot webhook su Render.com
 Gestisce le variabili d'ambiente e avvia il server webhook
 """
 import os
@@ -12,38 +12,48 @@ try:
     from dotenv import load_dotenv
     if os.path.exists("bot_infos_webh.env"):
         load_dotenv("bot_infos_webh.env")
-        print("✅ Loaded local .env file")
-    else:
-        print("📝 Using environment variables from Render")
+        print("📝 Variabili caricate da bot_infos_webh.env")
+    elif os.path.exists("../bot_infos.env"):
+        load_dotenv("../bot_infos.env")
+        print("📝 Variabili caricate da ../bot_infos.env")
 except ImportError:
-    print("📝 python-dotenv not available, using system environment")
+    print("⚠️ python-dotenv non disponibile, uso variabili sistema")
 
-# Verifica variabili obbligatorie
-required_vars = ["API_ID", "API_HASH", "BOT_TOKEN", "REDIS_URL"]
-missing = [var for var in required_vars if not os.getenv(var)]
-
-if missing:
-    print(f"❌ Missing required environment variables: {', '.join(missing)}")
-    print("Configure them in Render dashboard or check your .env file")
-    sys.exit(1)
-
-print("✅ All environment variables found")
-print(f"📡 Redis URL: {os.getenv('REDIS_URL')[:50]}...")
-print(f"🤖 Bot Token: {os.getenv('BOT_TOKEN')[:20]}...")
-
-# Determina se usare Gunicorn (produzione) o Flask dev server
-is_production = os.getenv("RENDER") is not None
-
-if is_production:
-    print("🏭 Produzione: Avvio con Gunicorn")
-    # Su Render, usa Gunicorn per produzione
-    port = os.getenv("PORT", "5000")
-    workers = os.getenv("WEB_CONCURRENCY", "2")
+def check_required_env():
+    """Verifica che le variabili obbligatorie siano definite"""
+    required = [
+        "API_ID", "API_HASH", "BOT_TOKEN", "CHANNEL_ID", 
+        "ADMIN_ID", "REDIS_URL", "WEBHOOK_URL"
+    ]
     
-    # Avvia Gunicorn
-    os.system(f"gunicorn --bind 0.0.0.0:{port} --workers {workers} --timeout 120 --keep-alive 2 --log-level info wsgi:application")
-else:
-    print("�️ Sviluppo: Avvio con Flask dev server")
-    # Sviluppo locale: usa Flask dev server
-    from main import main as start_webhook_server
-    start_webhook_server()
+    missing = []
+    for var in required:
+        value = os.environ.get(var)
+        if not value:
+            missing.append(var)
+        else:
+            # Maschera valori sensibili nel log
+            if var in ["BOT_TOKEN", "API_HASH", "REDIS_URL"]:
+                masked = value[:6] + "..." + value[-4:] if len(value) > 10 else "***"
+                print(f"✅ {var}: {masked}")
+            else:
+                print(f"✅ {var}: {value}")
+    
+    if missing:
+        print(f"❌ Variabili mancanti: {', '.join(missing)}")
+        return False
+    
+    return True
+
+if __name__ == "__main__":
+    print("🚀 Avvio bot webhook (DEV mode)...")
+    
+    # Verifica configurazione
+    if not check_required_env():
+        print("💥 Configurazione incompleta!")
+        sys.exit(1)
+    
+    # Avvia server Flask in dev mode
+    print("🌐 Avvio server Flask DEV...")
+    from main import main
+    main()

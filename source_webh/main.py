@@ -47,13 +47,6 @@ app = Flask(__name__)
 loop = None
 bot_ready = False
 
-def setup_event_loop():
-    """Setup event loop per operazioni async in thread separato."""
-    global loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_forever()
-
 async def initialize_bot():
     """Inizializza il bot senza avviare polling."""
     global bot_ready
@@ -71,6 +64,50 @@ async def initialize_bot():
     except Exception as e:
         logging.error(f"❌ Errore inizializzazione bot: {e}")
         bot_ready = False
+
+# Inizializza subito l'event loop e il bot quando il modulo viene importato
+# Questo funziona sia con Gunicorn che con Flask dev server
+def init_on_import():
+    """Inizializza bot quando il modulo viene importato."""
+    global loop, bot_ready
+    
+    if loop is None:  # Evita inizializzazione multipla
+        import asyncio
+        from threading import Thread
+        
+        # Avvia event loop in thread separato
+        def start_loop():
+            global loop
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_forever()
+            
+        loop_thread = Thread(target=start_loop, daemon=True)
+        loop_thread.start()
+        
+        # Aspetta che l'event loop sia pronto
+        import time
+        time.sleep(1)
+        
+        # Inizializza bot
+        if loop:
+            try:
+                future = asyncio.run_coroutine_threadsafe(initialize_bot(), loop)
+                future.result(timeout=30)
+            except Exception as e:
+                logging.error(f"❌ Errore inizializzazione bot: {e}")
+
+# Chiama inizializzazione
+init_on_import()
+
+def setup_event_loop():
+    """Setup event loop per operazioni async in thread separato."""
+    global loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
+# initialize_bot spostata prima di init_on_import
 
 async def setup_webhook():
     """
@@ -248,40 +285,21 @@ def main():
     import time
     time.sleep(1)
     
-    # Inizializza bot (non bloccare se fallisce)
-    try:
-        asyncio.run_coroutine_threadsafe(initialize_bot(), loop).result(timeout=30)
-    except Exception as e:
-        logging.error(f"❌ Errore durante inizializzazione: {e}")
-        
-    if not bot_ready:
-        logging.warning("⚠️ Bot non pronto, ma continuo con server HTTP")
-        logging.warning("🔧 Il webhook risponderà con bot_not_ready fino a risoluzione")
+    # Il bot è già inizializzato da init_on_import()
     
-    # Setup webhook se URL fornito
+    # Setup webhook info
     try:
         asyncio.run_coroutine_threadsafe(setup_webhook(), loop).result(timeout=10)
     except Exception as e:
-        logging.warning(f"⚠️ Setup webhook fallito: {e}")
+        logging.warning(f"⚠️ Setup webhook info fallito: {e}")
     
-    # Avvia Flask server
-    port = int(os.environ.get("PORT", 5000))
-    host = os.environ.get("HOST", "0.0.0.0")
-    
-    logging.info(f"🌐 Server in ascolto su {host}:{port}")
-    
-    # Determina se siamo in produzione o sviluppo
-    is_production = os.environ.get("RENDER") is not None or os.environ.get("RAILWAY") is not None
-    
-    if is_production:
-        # PRODUZIONE: Usa Gunicorn tramite start command su Render
-        logging.info("🏭 Modalità produzione - server avviato tramite Gunicorn")
-        # Non chiamare app.run() in produzione, Gunicorn gestisce tutto
-        logging.info("✅ Applicazione pronta per Gunicorn")
-    else:
-        # SVILUPPO: Usa Flask dev server
+    # Avvia Flask DEV server solo se non siamo sotto Gunicorn
+    if not os.environ.get('SERVER_SOFTWARE', '').startswith('gunicorn'):
+        port = int(os.environ.get("PORT", 5000))
+        host = os.environ.get("HOST", "0.0.0.0")
         debug_mode = os.environ.get("FLASK_DEBUG", "true").lower() == "true"
-        logging.info("🛠️ Modalità sviluppo - usando Flask dev server")
+        
+        logging.info(f"🌐 Avvio Flask DEV server su {host}:{port} (debug={debug_mode})")
         
         app.run(
             host=host,
@@ -289,6 +307,8 @@ def main():
             debug=debug_mode,
             threaded=True
         )
+    else:
+        logging.info("🏭 Sotto Gunicorn - Flask DEV server non avviato")
 
 if __name__ == "__main__":
     main()
