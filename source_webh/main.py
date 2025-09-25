@@ -188,7 +188,7 @@ async def process_webhook_update(update_data):
     try:
         # Pyrogram webhook: chiama direttamente il dispatcher interno
         # Questo processerà automaticamente tutti gli handler registrati
-        await bot.handle_update(update_data)
+        await bot.handle_updates([update_data])
         
         logging.info("[WEBHOOK] Update processato con successo")
         
