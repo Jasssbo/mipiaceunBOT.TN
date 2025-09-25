@@ -1,0 +1,13 @@
+# File da non caricare su GitHub
+bot_infos_webh.env
+*.session
+*.session-journal
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.db
+.env
+.DS_Store
+Thumbs.db
