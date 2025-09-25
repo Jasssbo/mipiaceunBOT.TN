@@ -2,22 +2,55 @@ import json
 import os
 import logging
 import asyncio
+import tempfile
 from datetime import datetime
 from config import report_state, bot, CHAT_ID
 from pyrogram import filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
-REPORTS_FILE = os.path.join(os.path.dirname(__file__), '../../reports.json')
+# File locking for atomic writes
+from filelock import FileLock
+
+
+# Percorso del file dei report (assoluto)
+REPORTS_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../reports.json'))
+REPORTS_LOCK = REPORTS_FILE + '.lock'
+
 
 def load_reports():
+    """Carica i report dal file JSON in modo thread-safe."""
     if not os.path.exists(REPORTS_FILE):
         return []
-    with open(REPORTS_FILE, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    lock = FileLock(REPORTS_LOCK)
+    with lock:
+        with open(REPORTS_FILE, 'r', encoding='utf-8') as f:
+            try:
+                return json.load(f)
+            except (json.JSONDecodeError, ValueError):
+                logging.error(f"[REPORT] reports.json corrotto o non valido: {REPORTS_FILE}")
+                return []
+
 
 def save_reports(reports):
-    with open(REPORTS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(reports, f, ensure_ascii=False, indent=2)
+    """Salva i report nel file JSON in modo atomico e thread-safe."""
+    dirpath = os.path.dirname(REPORTS_FILE)
+    os.makedirs(dirpath, exist_ok=True)
+    lock = FileLock(REPORTS_LOCK)
+    with lock:
+        fd, tmp_path = tempfile.mkstemp(dir=dirpath, prefix='reports_', suffix='.tmp')
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as tf:
+                json.dump(reports, tf, ensure_ascii=False, indent=2)
+                tf.flush()
+                os.fsync(tf.fileno())
+            os.replace(tmp_path, REPORTS_FILE)
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+
 
 def add_report(reported_user, reporter, reason):
     reports = load_reports()
@@ -44,19 +77,30 @@ async def ban_user_if_needed(client, username):
 
 async def create_timeout_task(client, user_id, timeout=300):
     """Crea un nuovo task di timeout per una segnalazione"""
+    # Create and return an asyncio Task that will handle the timeout.
     return client.loop.create_task(timeout_report_state(client, user_id, timeout))
-
 async def timeout_report_state(client, user_id, timeout=300):
     """Gestisce il timeout per una segnalazione"""
     await asyncio.sleep(timeout)
     if user_id in report_state:
         logging.info(f"[REPORT] Timeout segnalazione per user_id={user_id}")
+        # Remove any stored state for this user and notify them.
+        # If a timeout task reference exists, cancel it (defensive).
+        try:
+            if "timeout_task" in report_state.get(user_id, {}):
+                try:
+                    report_state[user_id]["timeout_task"].cancel()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         report_state.pop(user_id, None)
         try:
             await client.send_message(user_id, "⏱️ Tempo scaduto! La segnalazione è stata annullata. Premi di nuovo 'Segnala utente' per riprovare.")
-        except Exception as e:
-            logging.error(f"[REPORT] Errore nell'invio del messaggio di timeout: {str(e)}")
-
+        except Exception:
+            # Ignore send errors on timeout
+            pass
 def is_reporting(_, __, message):
     """Verifica se l'utente è in fase di segnalazione.
     Questo filtro personalizzato verifica se l'utente è nel dizionario report_state,
@@ -87,6 +131,49 @@ def is_annulla_text(_, __, message):
         return text == "annulla" or text == "/annulla" or text == "annulla." or text == "annulla!" or text == "stop"
     except:
         return False
+
+
+def _get_user_identifier_from_message(message: Message) -> str:
+    """Return a stable identifier for the user: username if available, otherwise numeric id as string."""
+    if message.from_user and message.from_user.username:
+        return message.from_user.username
+    return str(message.from_user.id)
+
+
+@bot.on_message(filters.private & filters.command(["privacy", "informativa", "informativa_privacy"]))
+async def privacy_command_handler(client, message: Message):
+    """Send a short privacy notice to the user."""
+    text = (
+        "Informativa sulla privacy:\n"
+        "Conserviamo segnalazioni su file locale (reports.json) per finalità legate alla moderazione.\n"
+        "I dati conservati sono: username segnalato, username/id del segnalatore, motivazione e timestamp.\n"
+        "Se vuoi che i tuoi dati vengano cancellati, usa /erase_my_data.\n"
+        "Per maggiori dettagli consulta i termini con il comando /terms o il maintainer del bot."
+    )
+    await message.reply(text)
+
+
+@bot.on_message(filters.private & filters.command(["erase_my_data", "erase", "gdpr_erase"]))
+async def erase_my_data_handler(client, message: Message):
+    """Erase reports where the requesting user is the reporter (username or id)."""
+    user_identifier = _get_user_identifier_from_message(message)
+    try:
+        reports = load_reports()
+        original_len = len(reports)
+
+        # Remove reports where reporter matches username or numeric id
+        filtered = [r for r in reports if str(r.get("reporter")) != user_identifier and str(r.get("reporter")) != str(message.from_user.id)]
+
+        removed = original_len - len(filtered)
+        if removed > 0:
+            save_reports(filtered)
+            await message.reply(f"✅ Ho cancellato {removed} segnalazione(i) che ti riguardavano come segnalatore.")
+            logging.info(f"[REPORT] Erase requested by {user_identifier}: removed {removed} reports")
+        else:
+            await message.reply("ℹ️ Non sono state trovate segnalazioni associate al tuo account come segnalatore.")
+    except Exception as e:
+        logging.exception(f"[REPORT] Errore durante l'erase_my_data per {user_identifier}: {e}")
+        await message.reply("❌ Si è verificato un errore durante la cancellazione dei tuoi dati. Riprova più tardi.")
 
 @bot.on_message(filters.private & filters.create(is_reporting) & ~filters.command(["annulla", "Annulla"]) & ~filters.create(is_annulla_text), group=1)
 async def report_user_handler(client, message: Message):
