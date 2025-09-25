@@ -15,6 +15,16 @@ from threading import Thread
 # Importa l'istanza del bot dal modulo di configurazione
 from config import bot, storage
 
+# IMPORTANTE: Importa tutti i moduli che registrano handler
+# Questo è necessario per far funzionare il bot in modalità webhook
+try:
+    from modules import start, buttons, topic_guardian
+    from modules.user_announcements_interactions import collect_data, announcement_compiler, report_user
+    logging.info("✅ Handler modules imported successfully")
+except ImportError as e:
+    logging.error(f"❌ Error importing handler modules: {e}")
+    sys.exit(1)
+
 # Configurazione del formato e del livello del testo dei log, per il debug e il monitoraggio.
 logging.basicConfig(
     level=logging.INFO,
@@ -64,20 +74,13 @@ async def initialize_bot():
 
 async def setup_webhook():
     """
-    Su Render, il webhook deve essere registrato manualmente dopo il deploy.
-    Questo serve solo per pulire eventuali webhook esistenti.
+    Su Render, il webhook viene registrato manualmente dopo il deploy.
+    Non gestiamo webhook dal codice per evitare problemi di permessi.
     """
-    try:
-        # Rimuovi webhook esistente per evitare conflitti
-        await bot.delete_webhook()
-        logging.info("🗑️ Webhook esistenti rimossi")
-        
-        # Log dell'URL che dovrà essere registrato manualmente
-        logging.info("📝 IMPORTANTE: Registra manualmente il webhook con:")
-        logging.info("curl -X POST 'https://api.telegram.org/bot<BOT_TOKEN>/setWebhook' -d 'url=https://your-app.onrender.com/webhook'")
-            
-    except Exception as e:
-        logging.error(f"❌ Errore setup webhook: {e}")
+    logging.info("📝 IMPORTANTE: Dopo il deploy, registra il webhook manualmente:")
+    logging.info(f"curl -X POST 'https://api.telegram.org/bot{os.getenv('BOT_TOKEN', '<BOT_TOKEN>')}/setWebhook' \\")
+    logging.info("     -d 'url=https://your-app-name.onrender.com/webhook'")
+    logging.info("💡 Sostituisci 'your-app-name' con il nome della tua app su Render")
 
 @app.route('/')
 def health_check():
@@ -119,18 +122,12 @@ def webhook():
             
         logging.info(f"[WEBHOOK] Ricevuto update tipo: {update_type}")
         
-        # Converti in oggetto Update di Pyrogram
-        try:
-            update = Update._parse(bot, update_data, {})
-        except Exception as e:
-            logging.error(f"[WEBHOOK] Errore parsing update: {e}")
-            return jsonify({"status": "parse_error"}), 200
-        
-        # Processa l'update in modo asincrono
+        # Processa l'update direttamente con i dati JSON
+        # Non è necessario convertire in oggetto Update, Pyrogram lo fa internamente
         if loop and not loop.is_closed():
-            # Schedula task nell'event loop
+            # Schedula task nell'event loop con i dati JSON originali
             asyncio.run_coroutine_threadsafe(
-                process_update_async(update), 
+                process_webhook_update(update_data), 
                 loop
             )
         else:
@@ -144,26 +141,46 @@ def webhook():
         logging.exception(f"[WEBHOOK] Errore critico: {e}")
         return jsonify({"status": "error", "message": str(e)}), 200
 
-async def process_update_async(update):
+async def process_webhook_update(update_data):
     """
-    Processa un update in modo asincrono.
-    Gestisce tutti gli errori per evitare crash del webhook.
+    Processa un update webhook usando il metodo CORRETTO di Pyrogram.
+    
+    IMPORTANTE: Pyrogram non ha bot.dispatcher.process_update()!
+    Il modo corretto è convertire i dati JSON in oggetti Pyrogram e 
+    chiamare gli handler direttamente tramite il meccanismo di dispatch.
     """
     try:
-        # Invia update ai handler del bot
-        await bot.handle_update(update)
+        # Il modo corretto per processare update in Pyrogram webhook:
+        # 1. Converti JSON in oggetto Update
+        from pyrogram.types import Update
+        
+        # Crea un oggetto Update dai dati JSON
+        update = Update._parse(bot, update_data, {})
+        
+        # 2. Processa l'update usando il sistema interno di Pyrogram
+        # Questo chiamerà automaticamente tutti gli handler registrati (@bot.on_message, @bot.on_callback_query, etc.)
+        if hasattr(bot, 'dispatcher') and hasattr(bot.dispatcher, 'updates_queue'):
+            # Aggiungi update alla coda del dispatcher
+            await bot.dispatcher.updates_queue.put(update)
+        else:
+            # Fallback: chiama direttamente il metodo di handling
+            await bot.handle_update(update)
+        
+        logging.info("[WEBHOOK] Update processato con successo")
         
     except Exception as e:
-        logging.exception(f"[UPDATE] Errore processamento update: {e}")
+        logging.exception(f"[WEBHOOK] Errore processamento update: {e}")
         
-        # In caso di errore, log dettagli per debug
+        # Log dettagli per debug
         try:
-            if hasattr(update, 'message') and update.message:
-                user_id = update.message.from_user.id if update.message.from_user else None
-                logging.error(f"[UPDATE] Errore con messaggio da user_id: {user_id}")
-            elif hasattr(update, 'callback_query') and update.callback_query:
-                user_id = update.callback_query.from_user.id if update.callback_query.from_user else None
-                logging.error(f"[UPDATE] Errore con callback da user_id: {user_id}")
+            if "message" in update_data:
+                from_user = update_data.get("message", {}).get("from", {})
+                user_id = from_user.get("id") if from_user else None
+                logging.error(f"[WEBHOOK] Update da user_id: {user_id}")
+            elif "callback_query" in update_data:
+                from_user = update_data.get("callback_query", {}).get("from", {})
+                user_id = from_user.get("id") if from_user else None
+                logging.error(f"[WEBHOOK] Callback da user_id: {user_id}")
         except:
             pass
 
@@ -178,10 +195,32 @@ def stats():
             "redis_health": storage.health_check(),
             "active_keys": storage.cleanup_expired(),
             "all_sessions": len(storage.get_all_user_sessions()),
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "bot_ready": bot_ready
         }
         return jsonify(stats)
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/reinit', methods=['POST'])
+def reinit_bot():
+    """Endpoint per re-inizializzare il bot in caso di problemi."""
+    try:
+        if loop and not loop.is_closed():
+            # Schedula re-inizializzazione
+            future = asyncio.run_coroutine_threadsafe(initialize_bot(), loop)
+            future.result(timeout=30)
+            
+            return jsonify({
+                "status": "success",
+                "bot_ready": bot_ready,
+                "message": "Bot re-inizializzato"
+            })
+        else:
+            return jsonify({"error": "Event loop non disponibile"}), 500
+            
+    except Exception as e:
+        logging.exception(f"[REINIT] Errore re-inizializzazione: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.errorhandler(404)
@@ -209,12 +248,15 @@ def main():
     import time
     time.sleep(1)
     
-    # Inizializza bot
-    asyncio.run_coroutine_threadsafe(initialize_bot(), loop).result(timeout=30)
-    
+    # Inizializza bot (non bloccare se fallisce)
+    try:
+        asyncio.run_coroutine_threadsafe(initialize_bot(), loop).result(timeout=30)
+    except Exception as e:
+        logging.error(f"❌ Errore durante inizializzazione: {e}")
+        
     if not bot_ready:
-        logging.error("❌ Bot non pronto, uscita")
-        sys.exit(1)
+        logging.warning("⚠️ Bot non pronto, ma continuo con server HTTP")
+        logging.warning("🔧 Il webhook risponderà con bot_not_ready fino a risoluzione")
     
     # Setup webhook se URL fornito
     try:

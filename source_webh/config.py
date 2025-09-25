@@ -31,7 +31,14 @@ if not all([API_ID, API_HASH, BOT_TOKEN]):
     sys.exit(1)
 
 # Istanza del client Pyrogram
-bot = Client("job_board_bot", api_id=int(API_ID), api_hash=API_HASH, bot_token=BOT_TOKEN)
+# Su Render, usa session in-memory per evitare "database is locked"
+bot = Client(
+    name=":memory:",  # Session in memoria, non su file
+    api_id=int(API_ID), 
+    api_hash=API_HASH, 
+    bot_token=BOT_TOKEN,
+    in_memory=True  # Forza session in memoria
+)
 
 # Inizializza storage (Redis) all'avvio
 try:
