@@ -6,8 +6,10 @@ import os
 import sys
 import logging
 import asyncio
+import aiohttp
 from datetime import datetime
 from flask import Flask, request, jsonify
+from pyrogram import filters
 
 # Importa l'istanza del bot dal modulo di configurazione
 from config import bot, storage
@@ -29,13 +31,8 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-# Importa gli handler per attivarli (necessario per registrazione)
-from modules.start import start_handler
-from modules.user_announcements_interactions import announcement_compiler
-from modules.user_announcements_interactions.collect_data import collect_data_handler
-from modules.buttons import buttons_callback_handler
-from modules.topic_guardian import topic_guardian_handler
-from modules.user_announcements_interactions.report_user import report_user_handler, annulla_report_handler
+# Handler registration is automatic via decorators when modules are imported above
+# No need for explicit imports here
 
 # Crea Flask app
 app = Flask(__name__)
@@ -44,30 +41,17 @@ app = Flask(__name__)
 loop = None
 bot_ready = False
 
-# Catch‑all debug handler per verificare che il dispatcher riceva gli update
-@bot.on_message()
-async def __debug_any_message(client, message):
+# Debug ping handler (specific, non-conflicting)
+@bot.on_message(filters.command("ping") & filters.private)
+async def ping_handler(client, message):
+    """Specific ping handler for testing - non-conflicting with other handlers."""
     try:
         uid = getattr(getattr(message, "from_user", None), "id", None)
-        txt = getattr(message, "text", None)
-        cid = getattr(getattr(message, "chat", None), "id", None)
         username = getattr(getattr(message, "from_user", None), "username", None)
-        logging.info(f"[🔥 DEBUG HANDLER] on_message fired: user={uid} (@{username}) chat={cid} text='{txt}'")
-        # Comando di test non invasivo
-        if txt and txt.strip().lower() == "/ping":
-            await message.reply("🏓 pong - bot is alive!")
+        logging.info(f"[🔥 PING] user={uid} (@{username}) requested ping")
+        await message.reply("🏓 pong - bot is alive!")
     except Exception as e:
-        logging.exception(f"[DEBUG HANDLER] error: {e}")
-
-# Debug callback query handler
-@bot.on_callback_query()
-async def __debug_callback(client, callback_query):
-    try:
-        uid = getattr(getattr(callback_query, "from_user", None), "id", None)
-        data = getattr(callback_query, "data", None)
-        logging.info(f"[🔥 DEBUG CALLBACK] callback_query fired: user={uid} data='{data}'")
-    except Exception as e:
-        logging.exception(f"[DEBUG CALLBACK] error: {e}")
+        logging.exception(f"[PING] error: {e}")
 
 async def initialize_bot():
     """Inizializza il bot senza avviare polling."""
@@ -90,9 +74,36 @@ async def initialize_bot():
         else:
             logging.warning("⚠️ Redis connection issues")
 
+        # Start keep-alive task on Render (better environment detection)
+        render_external_url = os.getenv('RENDER_EXTERNAL_URL')
+        if render_external_url or os.getenv('RENDER_SERVICE_ID'):
+            # Schedule task in the correct event loop
+            current_loop = asyncio.get_event_loop()
+            current_loop.create_task(keep_alive_task())
+            logging.info("🔄 Keep-alive task started for Render environment")
+
     except Exception as e:
         logging.error(f"❌ Errore inizializzazione bot: {e}")
         bot_ready = False
+
+async def keep_alive_task():
+    """Keep the service alive by making HTTP requests to itself every 4 minutes."""
+    render_url = os.getenv('RENDER_EXTERNAL_URL', 'https://mipiaceunbot-tn.onrender.com')
+    
+    while True:
+        try:
+            await asyncio.sleep(240)  # 4 minutes
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{render_url}/", timeout=30) as response:
+                    if response.status == 200:
+                        logging.info("🔄 Keep-alive ping successful")
+                    else:
+                        logging.warning(f"⚠️ Keep-alive ping failed: {response.status}")
+        except Exception as e:
+            logging.error(f"❌ Keep-alive ping error: {e}")
+        except asyncio.CancelledError:
+            logging.info("🛑 Keep-alive task cancelled")
+            break
 
 # Inizializza subito l'event loop e il bot quando il modulo viene importato
 # Questo funziona sia con Gunicorn che con Flask dev server

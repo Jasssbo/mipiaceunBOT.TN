@@ -21,10 +21,18 @@ class BotStorage:
     """
     
     def __init__(self, redis_url: Optional[str] = None):
-        """Initialize Redis connection with fallback to local Redis."""
+        """Initialize Redis connection with proper connection pooling."""
         self.redis_url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379")
         try:
-            self.redis = redis.from_url(self.redis_url, decode_responses=True)
+            # Use connection pooling for better performance and reliability
+            self.redis = redis.from_url(
+                self.redis_url, 
+                decode_responses=True,
+                max_connections=20,  # Connection pool size
+                retry_on_timeout=True,
+                socket_timeout=5,
+                socket_connect_timeout=5
+            )
             # Test connection
             self.redis.ping()
             logger.info(f"Redis connected successfully to {self.redis_url}")

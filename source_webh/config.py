@@ -37,7 +37,9 @@ bot = Client(
     api_id=int(API_ID), 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN,
-    in_memory=True  # Forza session in memoria
+    in_memory=True,  # Forza session in memoria
+    sleep_threshold=60,  # Reduce flood wait sleep time for webhooks
+    workdir="."  # Set working directory explicitly
 )
 
 # Inizializza storage (Redis) all'avvio
