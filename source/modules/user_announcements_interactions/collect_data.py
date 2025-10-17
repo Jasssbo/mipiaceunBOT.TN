@@ -5,25 +5,49 @@ import logging
 import asyncio
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
-from config import GREEN, RED, YELLOW, RESET,CATEGORY_QUESTIONS, user_data, bot, announce_timeout
+from config import GREEN, RED, YELLOW, RESET,CATEGORY_QUESTIONS, user_data, bot, CATEGORY_NAMES, announce_timeout
 from modules.user_announcements_interactions.announcement_compiler import send_preview, send_clean_message
 from modules.buttons import send_main_menu
+
+# Dizionario per tenere traccia dei messaggi di errore
+error_messages = {}
 
 # ------------------------ RACCOLTA DATI UTENTE ------------------------
 # --- Handler per la raccolta dati utente: gestisce domande, risposte e preview, eliminando i messaggi precedenti. ---
 @bot.on_message(filters.private & ~filters.command("start"))
 async def collect_data_handler(client, message: Message):
     user = message.from_user
+    user_id = user.id
+    
     # Gestisci solo utenti con sessione attiva e categoria impostata
-    if user.id not in user_data or not user_data[user.id].get("category"):
+    if user_id not in user_data or not user_data[user_id].get("category"):
         return
-    if "user_messages_to_delete" not in user_data[user.id]:
+
+    # Se c'è un messaggio di errore precedente per questo utente, eliminalo
+    if user_id in error_messages:
+        try:
+            await client.delete_messages(
+                chat_id=message.chat.id,
+                message_ids=error_messages[user_id]
+            )
+            del error_messages[user_id]
+        except Exception as e:
+            logging.error(f"Errore nell'eliminazione del messaggio di errore: {str(e)}")
+
+    if "user_messages_to_delete" not in user_data[user_id]:
         user_data[user.id]["user_messages_to_delete"] = []
     user_data[user.id]["user_messages_to_delete"].append(message.id)
     try:
         info = user_data[user.id]
         cat = info["category"]
         step = info["step"]
+
+        # Log quando l'utente inizia una nuova pubblicazione (step 0)
+        if step == 0:
+            category_name = CATEGORY_NAMES.get(cat, cat.capitalize() if cat else "")
+            username = user.username if user.username else f"user{user.id}"
+            logging.info(f"{GREEN}[NUOVO ANNUNCIO] @{username} ha iniziato la pubblicazione di un {category_name}{RESET}")
+
         question_data = CATEGORY_QUESTIONS[cat][step]
         question_text = question_data["question"]
         label_text = question_data["label"]
@@ -109,32 +133,54 @@ async def collect_data_handler(client, message: Message):
 
             # Se arriva testo diverso da /done, ignora o avvisa
             if message.text:
-                sent = await client.send_message(user.id, "❗ Invia una foto o un documento, oppure premi /done per continuare.")
-                info["multi_file_temp_msgs"].append(sent.id)
+                error_msg = await client.send_message(user.id, "❗ Invia una foto o un documento, oppure premi /done per continuare.")
+                error_messages[user_id] = error_msg.id
                 return
 
             # Se arriva altro tipo non gestito (audio, video, ecc.)
-            sent = await client.send_message(user.id, f"❗ Risposta non valida per questa domanda. Sono ammessi solo: {', '.join(allowed_types)} oppure /done.")
-            info["multi_file_temp_msgs"].append(sent.id)
+            error_msg = await client.send_message(user.id, f"❗ Risposta non valida per questa domanda. Sono ammessi solo: {', '.join(allowed_types)} oppure /done.")
+            error_messages[user_id] = error_msg.id
             return
 
         # --- Controllo tipo di messaggio per la domanda corrente (SOLO per domande normali) ---
         msg_type = None
+        username = user.username if user.username else f"user{user.id}"
+        
         if message.text and not message.photo and not message.document:
             msg_type = "text"
         elif message.photo:
             msg_type = "photo"
+            if "text" in allowed_types and not "photo" in allowed_types:
+                logging.warning(f"{YELLOW}[ERRORE VALIDAZIONE] @{username} ha inviato una foto quando era richiesto del testo per la domanda '{label_text}'{RESET}")
         elif message.document:
             msg_type = "document"
+            if "text" in allowed_types and not "document" in allowed_types:
+                logging.warning(f"{YELLOW}[ERRORE VALIDAZIONE] @{username} ha inviato un documento quando era richiesto del testo per la domanda '{label_text}'{RESET}")
         elif message.audio:
             msg_type = "audio"
+            if "text" in allowed_types and not "audio" in allowed_types:
+                logging.warning(f"{YELLOW}[ERRORE VALIDAZIONE] @{username} ha inviato un audio quando era richiesto del testo per la domanda '{label_text}'{RESET}")
         elif message.voice:
             msg_type = "voice"
+            if "text" in allowed_types and not "voice" in allowed_types:
+                logging.warning(f"{YELLOW}[ERRORE VALIDAZIONE] @{username} ha inviato una nota vocale quando era richiesto del testo per la domanda '{label_text}'{RESET}")
         elif message.video:
             msg_type = "video"
+            if "text" in allowed_types and not "video" in allowed_types:
+                logging.warning(f"{YELLOW}[ERRORE VALIDAZIONE] @{username} ha inviato un video quando era richiesto del testo per la domanda '{label_text}'{RESET}")
+        elif message.sticker:
+            msg_type = "sticker"
+            logging.warning(f"{YELLOW}[ERRORE VALIDAZIONE] @{username} ha inviato uno sticker quando era richiesto del testo per la domanda '{label_text}'{RESET}")
+        elif message.animation:
+            msg_type = "animation"
+            logging.warning(f"{YELLOW}[ERRORE VALIDAZIONE] @{username} ha inviato una GIF quando era richiesto del testo per la domanda '{label_text}'{RESET}")
+        elif not msg_type:  # Se non è stato identificato nessun tipo di messaggio conosciuto
+            msg_type = "unknown"
+            logging.warning(f"{YELLOW}[ERRORE VALIDAZIONE] @{username} ha inviato un tipo di messaggio non supportato per la domanda '{label_text}'{RESET}")
 
         if msg_type and msg_type not in allowed_types:
-            await client.send_message(user.id, f"❗ Risposta non valida per questa domanda. Sono ammessi solo: {', '.join(allowed_types)}.")
+            error_msg = await client.send_message(user.id, f"❗ Risposta non valida per questa domanda. Sono ammessi solo: {', '.join(allowed_types)}.")
+            error_messages[user_id] = error_msg.id
             return
 
         # --- Gestione domande normali (singolo file o testo) ---
@@ -195,10 +241,33 @@ async def add_file_and_confirm(client, user_id, info, label_text, file_id, file_
     info["multi_file_temp_msgs"].append(sent.id)
 
 # --- Funzione di cleanup dati e messaggi utente ---
-async def cleanup_user_data_and_messages(client, user_id, reason=""):
+async def cleanup_user_data_and_messages(client, user_id, reason="", cleanup_type=""):
     info = user_data.get(user_id)
     if not info:
         return
+
+    # Log dell'interruzione della pubblicazione
+    try:
+        user = await client.get_users(user_id)
+        username = user.username if user.username else f"user{user.id}"
+        category = info.get("category")
+        if category:
+            category_name = {
+                "job": "Annuncio di Lavoro",
+                "project": "Progetto",
+                "event": "Evento",
+                "profile": "Profilo"
+            }.get(category, category.capitalize() if category else "")
+            
+            if cleanup_type == "timeout":
+                logging.info(f"{YELLOW}[TIMEOUT ANNUNCIO] @{username} non ha completato la pubblicazione di un {category_name} entro il tempo limite{RESET}")
+            elif cleanup_type == "cancel":
+                logging.info(f"{RED}[ANNUNCIO ANNULLATO] @{username} ha annullato la pubblicazione di un {category_name}{RESET}")
+            else:
+                logging.info(f"{YELLOW}[PUBBLICAZIONE INTERROTTA] @{username} ha interrotto la pubblicazione di un {category_name}{RESET}")
+    except Exception as e:
+        logging.error(f"Errore nel logging della cancellazione annuncio: {str(e)}")
+
     # Cancella messaggi temporanei
     for mid in info.get("messages_to_delete", []):
         try:
@@ -210,6 +279,20 @@ async def cleanup_user_data_and_messages(client, user_id, reason=""):
             await client.delete_messages(user_id, mid)
         except Exception:
             pass
+            
+    # Elimina eventuali messaggi di errore
+    if user_id in error_messages:
+        try:
+            # In una chat privata, chat_id e user_id sono la stessa cosa
+            await client.delete_messages(
+                chat_id=user_id,  # In una chat privata, questo è equivalente a message.chat.id
+                message_ids=error_messages[user_id]
+            )
+            del error_messages[user_id]
+        except Exception as e:
+            logging.error(f"Errore nell'eliminazione del messaggio di errore durante il cleanup: {str(e)}")
+            # Rimuoviamo comunque il riferimento dal dizionario
+            del error_messages[user_id]
     for mid in info.get("user_messages_to_delete", []):
         try:
             await client.delete_messages(user_id, mid)
@@ -228,4 +311,4 @@ async def start_compilation_timeout(client, user_id, announce_timeout):
     await asyncio.sleep(announce_timeout)
     # Cleanup solo se l'utente ha davvero iniziato la compilazione (ha una categoria)
     if user_id in user_data and user_data[user_id].get("category"):
-        await cleanup_user_data_and_messages(client, user_id)
+        await cleanup_user_data_and_messages(client, user_id, cleanup_type="timeout")

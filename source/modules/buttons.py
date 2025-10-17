@@ -4,7 +4,7 @@ Handler per tutte le interazioni con i bottoni InlineKeyboard.
 import logging
 import asyncio
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from config import CATEGORY_QUESTIONS, user_data, bot, CHAT_ID, YELLOW, GREEN, RED, RESET, POINTER_MESSAGE_IDS, announce_timeout, report_state
+from config import CATEGORY_QUESTIONS, user_data, bot, CHAT_ID, YELLOW, GREEN, RED, BLUE, RESET, POINTER_MESSAGE_IDS, announce_timeout, report_state
 from modules.user_announcements_interactions.announcement_compiler import send_clean_message, send_preview, update_preview_with_id, publish_announcement, is_user_allowed_by_username, safe_delete
 from modules.topic_guardian import is_user_allowed_by_username
 
@@ -50,10 +50,13 @@ async def send_main_menu(client, user_id, msg="🏠 Sei tornato al menù princip
 # ------------------------ BUTTONS CALLBACK HANDLER ------------------------
 # buttons_callback_handler: Gestisce tutte le interazioni con i bottoni InlineKeyboard, 
 # come la navigazione tra le domande, la conferma o l'annullamento della pubblicazione,
-# e il ritorno al menù principale. Ogni blocco gestisce un tipo di callback specifico.
+# e il ritorno al menù principale. 
+# Ogni blocco gestisce un tipo di callback specifico.
 
 @bot.on_callback_query()
 async def buttons_callback_handler(client, callback_query: CallbackQuery):
+    user = callback_query.from_user
+    username = user.username if user.username else f"user{user.id}"
     user_id = callback_query.from_user.id
     uid = user_id
     data = getattr(callback_query, 'data', None)
@@ -63,7 +66,7 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
 
     # --- Gestione segnalazione utente ---
     if data == "report_user":
-        logging.info(f"[BUTTONS] Avvio procedura segnalazione per user_id={user_id}")
+        logging.info(f"{BLUE}[BUTTONS] Avvio procedura segnalazione per @{username} -> user_id={user_id}{RESET}")
         await callback_query.answer()
         
         # Crea un nuovo task per il timeout (senza importazione circolare)
@@ -84,14 +87,14 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             user_id, 
             "🔎 Invia l'@username dell'utente che vuoi segnalare oppure inoltra un suo messaggio.\n"
             "⏱️ Hai 5 minuti per completare la segnalazione.\n"
-            "❌ Puoi annullare in qualsiasi momento con /annulla o premendo il bottone qui sotto.",
+            "❌ Puoi annullare in qualsiasi momento premendo il bottone qui sotto.",
             reply_markup=buttons
         )
         return
         
     # --- Gestione annullamento segnalazione tramite bottone ---
     if data == "cancel_report":
-        logging.info(f"[BUTTONS] Annullamento segnalazione tramite bottone per user_id={user_id}")
+        logging.info(f"{BLUE}[REPORT] Annullamento della segnalazione da parte di @{username} -> user_id={user_id}{RESET}")
         await callback_query.answer("Segnalazione annullata")
         
         # Verifica se l'utente è in stato di segnalazione
@@ -100,9 +103,9 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             if "timeout_task" in report_state[user_id]:
                 try:
                     report_state[user_id]["timeout_task"].cancel()
-                    logging.info(f"[BUTTONS] Task timeout cancellato per user_id={user_id}")
+                    logging.info(f"{BLUE}[REPORT] Task timeout cancellato per @{username} -> user_id={user_id}{RESET}")
                 except Exception as e:
-                    logging.error(f"[BUTTONS] Errore nella cancellazione del timeout task: {str(e)}")
+                    logging.error(f"{YELLOW}[REPORT] Errore nella cancellazione del timeout task: {str(e)} di @{username}{RESET}")
             
             # Rimuovi lo stato
             report_state.pop(user_id, None)
@@ -117,15 +120,21 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             parts = data.split("_")
             ann_ids = [int(i) for i in parts[1].split(",") if i and i != 'None']
             user = callback_query.from_user
+            username = user.username if user.username else f"user{user.id}"
+
             if ann_ids:
+                first_ann_id = ann_ids[0] if ann_ids else '-'
+                # Log prima dell'eliminazione
+                logging.info(f"{BLUE}[ELIMINAZIONE ANNUNCIO] @{username} ha eliminato l'annuncio (ID: {first_ann_id}){RESET}")
                 await client.delete_messages(CHAT_ID, ann_ids)
+
             await client.delete_messages(user.id, callback_query.message.id)
             menu_btn = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
             ])
             await client.send_message(
                 user.id,
-                f"✅ Annuncio eliminato con successo.\nID annuncio: {ann_ids[0] if ann_ids else '-'}",
+                f"✅ Annuncio eliminato con successo.\nID annuncio: {first_ann_id if ann_ids else '-'}",
                 reply_markup=menu_btn
             )
             await callback_query.answer("Hai cancellato il tuo annuncio.", show_alert=False)
@@ -155,7 +164,7 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
 
     try:
         if data is None:
-            logging.error(f"[BUTTONS] Callback senza data ricevuta da utente {uid}. Callback: {callback_query}")
+            logging.error(f"{YELLOW}[BUTTONS] Callback senza data ricevuta da utente{username}->{uid}. Callback: {callback_query}{RESET}")
             await callback_query.answer("❌ Errore interno: dati mancanti.", show_alert=True)
             return
         if data.startswith("new_"):
@@ -281,7 +290,10 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                 await safe_delete(client, uid, preview_id)
             if confirm_id:
                 await safe_delete(client, uid, confirm_id)
-            user_data.pop(uid, None)
+            
+            # Cleanup con tipo specifico per il log
+            from modules.user_announcements_interactions.collect_data import cleanup_user_data_and_messages
+            await cleanup_user_data_and_messages(client, uid, cleanup_type="cancel")
             await send_main_menu(client, uid, "❌ Annuncio annullato. Sei tornato al menù principale.")
         # --- Eliminazione annuncio tramite bottone ---
         elif data.startswith("delete_"):
@@ -289,15 +301,21 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                 parts = data.split("_")
                 ann_ids = [int(i) for i in parts[1].split(",") if i and i != 'None']
                 user = callback_query.from_user
+                username = user.username if user.username else f"user{user.id}"
+
                 if ann_ids:
+                    first_ann_id = ann_ids[0] if ann_ids else '-'
+                    # Log prima dell'eliminazione
+                    logging.info(f"{BLUE}[ELIMINAZIONE ANNUNCIO] @{username} ha eliminato l'annuncio (ID: {first_ann_id}){RESET}")
                     await client.delete_messages(CHAT_ID, ann_ids)
+
                 await client.delete_messages(user.id, callback_query.message.id)
                 menu_btn = InlineKeyboardMarkup([
                     [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
                 ])
                 await client.send_message(
                     user.id,
-                    f"✅ Annuncio eliminato con successo.\nID annuncio: {ann_ids[0] if ann_ids else '-'}",
+                    f"✅ Annuncio eliminato con successo.\nID annuncio: {first_ann_id if ann_ids else '-'}",
                     reply_markup=menu_btn
                 )
                 await callback_query.answer("Hai cancellato il tuo annuncio.", show_alert=False)
@@ -363,6 +381,3 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
     except Exception as e:
         logging.exception(f"{YELLOW}Errore nel callback handler. Utente: {uid}, Data: {data}{RESET}")
         await send_clean_message(client, user_id, user_id, f"❌ Errore: {str(e)}")
-
-# La funzione timeout_report_state è stata spostata nel modulo report_user per migliorare la manutenibilità
-

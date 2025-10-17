@@ -1,1 +1,0 @@
-# User announcements interactions init file

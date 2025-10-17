@@ -1,5 +1,0 @@
-# Dipendenze minime per test webhook
-flask==2.3.3
-pyrogram==2.0.106
-tgcrypto==1.2.5
-python-dotenv==1.0.1

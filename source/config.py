@@ -31,6 +31,7 @@ RESET = "\033[0m"
 GREEN = "\033[92m"
 YELLOW = "\033[93m"
 RED = "\033[91m"
+BLUE = "\033[94m"
 
 # --- MESSAGGI DI PUNTAMENTO ---
 # Definisce gli ID dei messaggi di puntamento per la pubblicazione degli annunci nei topic specifici.
@@ -45,8 +46,18 @@ POINTER_MESSAGE_IDS = {
 ALLOWED_TOPIC_IDS = [1]  # Sostituisci con gli ID dei topic dove gli utenti possono scrivere liberamente
 NOT_ALLOWED_TOPIC_IDS = [10, 11, 12, 28]  # Sostituisci con gli ID dei topic dove SOLO il bot può pubblicare
 
- # Tempo entro cui l'utente deve finire l'annuncio altrimenti viene eliminato per alleggerire lo user_data
-announce_timeout = 180 #in secondi
+# Mapping delle categorie per la visualizzazione nei log
+CATEGORY_NAMES = {
+    "job": "Annuncio di Lavoro",
+    "project": "Progetto",
+    "event": "Evento",
+    "profile": "Profilo"
+}
+
+# Tempo entro cui l'utente deve finire l'annuncio altrimenti viene eliminato per alleggerire lo user_data
+announce_timeout = 1200 # in secondi (20 minuti)
+
+report_timeout = 300 # in secondi (5 minuti)
 
 # --- Dizionario per gestire lo stato e i dati di ogni utente ---
 user_data = {}

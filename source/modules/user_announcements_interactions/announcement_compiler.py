@@ -1,5 +1,5 @@
 import logging
-from config import CHAT_ID, GREEN, RED, YELLOW, RESET, user_data, POINTER_MESSAGE_IDS
+from config import CHAT_ID, GREEN, RED, YELLOW, RESET, user_data, POINTER_MESSAGE_IDS, CATEGORY_NAMES
 from modules.topic_guardian import is_user_allowed_by_username
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from pyrogram import errors
@@ -19,16 +19,7 @@ async def safe_delete(client, chat_id, message_id):
 # Funzione per costruire il testo dell'annuncio
 def build_announcement_text(info, user, show_id=None):
     cat = info["category"]
-    if cat == "job":
-        category_name = "Annuncio di Lavoro"
-    elif cat == "project":
-        category_name = "Progetto"
-    elif cat == "event":
-        category_name = "Evento"
-    elif cat == "profile":
-        category_name = "Profilo"
-    else:
-        category_name = cat.capitalize() if cat else ""
+    category_name = CATEGORY_NAMES.get(cat, cat.capitalize() if cat else "")
     author = f"@{user.username}" if user.username else user.first_name
     text = ""
     if show_id is not None:

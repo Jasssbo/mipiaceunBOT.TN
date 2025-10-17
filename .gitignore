@@ -1,7 +1,7 @@
-# Esclude il file con le credenziali
+# Esclude il file con le credenziali e le segnalazioni degli utenti
 bot_infos.env
-bot_infos_webh.env
 reports.json
+reports.json.lock
 
 # Esclude la cartella di Pyrogram se esiste
 job_board_bot.session
@@ -9,6 +9,7 @@ job_board_bot.session-journal
 job_bot.session
 
 # Esclude file temporanei e cartelle di sistema
+.venv
 __pycache__/
 *.pyc
 .DS_Store
