@@ -6,8 +6,8 @@ import logging
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 from config import CHAT_ID, GREEN, RED, YELLOW, RESET, user_data, bot
-from modules.user_announcements_interactions.user_check import is_user_allowed_by_username
-from modules.user_announcements_interactions.announcement_compiler import send_clean_message, is_user_allowed_by_username
+from modules.permissions.user_permissions import is_user_allowed_by_username
+from modules.user_announcements_interactions.announcement_handler import send_clean_message, is_user_allowed_by_username
 
 # --- Handler per comando /start: verifica presenza utente nel gruppo e mostra menù principale ---
 @bot.on_message(filters.command("start") & filters.private)

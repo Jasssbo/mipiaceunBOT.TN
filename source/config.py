@@ -7,7 +7,6 @@ import logging
 import sys
 import os
 from dotenv import load_dotenv
-import sys
 from pyrogram import Client
 
 

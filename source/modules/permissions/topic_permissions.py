@@ -5,7 +5,7 @@ import logging
 from pyrogram import filters
 from config import ALLOWED_TOPIC_IDS, NOT_ALLOWED_TOPIC_IDS, CHAT_ID, GREEN, RED, YELLOW, RESET, bot
 from pyrogram.types import Message
-from modules.user_announcements_interactions.user_check import is_user_allowed_by_username
+from modules.permissions.user_permissions import is_user_allowed_by_username
 
 @bot.on_message(filters.group)
 async def topic_guardian_handler(client, message: Message):

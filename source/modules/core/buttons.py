@@ -5,8 +5,8 @@ import logging
 import asyncio
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from config import CATEGORY_QUESTIONS, user_data, bot, CHAT_ID, YELLOW, GREEN, RED, BLUE, RESET, POINTER_MESSAGE_IDS, announce_timeout, report_state
-from modules.user_announcements_interactions.announcement_compiler import send_clean_message, send_preview, update_preview_with_id, publish_announcement, is_user_allowed_by_username, safe_delete
-from modules.topic_guardian import is_user_allowed_by_username
+from modules.user_announcements_interactions.utils.message_utils import send_clean_message, safe_delete
+from modules.permissions.topic_permissions import is_user_allowed_by_username
 
 # Funzione per gestire il timeout della segnalazione
 async def async_timeout_report_state(client, user_id, timeout_seconds=300):
@@ -187,11 +187,13 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             }
             # Avvia il timeout solo ora
             import asyncio
+            from modules.user_announcements_interactions.announcement_handler import start_compilation_timeout
             if user_data[user_id]["timeout_task"] is None:
                 user_data[user_id]["timeout_task"] = asyncio.create_task(
-                    __import__('modules.user_announcements_interactions.collect_data').user_announcements_interactions.collect_data.start_compilation_timeout(client, user_id, announce_timeout)
+                    start_compilation_timeout(client, user_id, announce_timeout)
                 )
-            await send_clean_message(
+            # Invia la prima domanda e salva l'ID per poterla eliminare dopo
+            first_question_id = await send_clean_message(
                 client,
                 user_id,
                 user_id,
@@ -200,6 +202,7 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                     [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
                 ])
             )
+            # `send_clean_message` aggiorna già user_data[user_id]['messages_to_delete']
         # --- Ritorno al menù principale ---
         elif data == "back_to_menu":
             user = await client.get_users(user_id)
@@ -220,6 +223,7 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                 return
             info = user_data[uid]
             # Pubblica l'annuncio nel gruppo e salva tutti gli id dei messaggi pubblicati
+            from modules.user_announcements_interactions.announcement_handler import publish_announcement
             msg = await publish_announcement(client, uid, info, POINTER_MESSAGE_IDS)
             ann_media_ids = []
             if "last_ann_media_ids" in info:
@@ -227,7 +231,7 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             else:
                 ann_media_ids = [msg.id] if msg else []
             # Invia una nuova preview privata con ID e bottoni, salva tutti gli id
-            from modules.user_announcements_interactions.announcement_compiler import build_announcement_text
+            from modules.user_announcements_interactions.announcement_handler import build_announcement_text
             text = build_announcement_text(info, user, show_id=msg.id)
             files = info.get("files", {})
             multi_file_label = None
@@ -292,7 +296,7 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                 await safe_delete(client, uid, confirm_id)
             
             # Cleanup con tipo specifico per il log
-            from modules.user_announcements_interactions.collect_data import cleanup_user_data_and_messages
+            from modules.user_announcements_interactions.announcement_handler import cleanup_user_data_and_messages
             await cleanup_user_data_and_messages(client, uid, cleanup_type="cancel")
             await send_main_menu(client, uid, "❌ Annuncio annullato. Sei tornato al menù principale.")
         # --- Eliminazione annuncio tramite bottone ---
@@ -366,6 +370,7 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                 buttons.append([InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")])
                 await send_clean_message(client, user_id, user_id, next_q, InlineKeyboardMarkup(buttons))
             else:
+                from modules.user_announcements_interactions.announcement_handler import send_preview
                 preview_id = await send_preview(client, user_id, info)
                 user_data[user_id]["preview_msg_id"] = preview_id
                 confirm_btns = InlineKeyboardMarkup([

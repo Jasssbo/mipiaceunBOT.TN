@@ -17,13 +17,13 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 # Importa gli handler per attivarli
-from modules.start import start_handler
-from modules.user_announcements_interactions.user_check import is_user_allowed_by_username
-from modules.user_announcements_interactions import announcement_compiler
-from modules.user_announcements_interactions.collect_data import collect_data_handler
-from modules.buttons import buttons_callback_handler
-from modules.topic_guardian import topic_guardian_handler
-from modules.user_announcements_interactions.report_user import report_user_handler
+from modules.core.start import start_handler
+from modules.permissions.user_permissions import is_user_allowed_by_username
+from modules.user_announcements_interactions import announcement_handler
+from modules.user_announcements_interactions.announcement_handler import collect_data_handler
+from modules.core.buttons import buttons_callback_handler
+from modules.permissions.topic_permissions import topic_guardian_handler
+from modules.reports.report_user import report_user_handler
 # ------------------------ AVVIO e ARRESTO BOT ------------------------
 # --- Avvio e arresto del bot Telegram ---
 if __name__ == "__main__":
