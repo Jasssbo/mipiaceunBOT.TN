@@ -4,9 +4,17 @@ Handler per tutte le interazioni con i bottoni InlineKeyboard.
 import logging
 import asyncio
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from config import CATEGORY_QUESTIONS, user_data, bot, CHAT_ID, YELLOW, GREEN, RED, BLUE, RESET, POINTER_MESSAGE_IDS, announce_timeout, report_state
+from config import CATEGORY_QUESTIONS, bot, CHAT_ID, YELLOW, GREEN, RED, BLUE, RESET, POINTER_MESSAGE_IDS, announce_timeout
 from modules.user_announcements_interactions.utils.message_utils import send_clean_message, safe_delete
 from modules.permissions.topic_permissions import is_user_allowed_by_username
+from core.session_manager import get_announcement_sessions, get_report_sessions
+from services.message_service import get_message_service
+from core.ui_components import build_main_menu_keyboard, build_back_to_menu_keyboard, build_cancel_report_keyboard
+
+# Get service instances
+announcement_sessions = get_announcement_sessions()
+report_sessions = get_report_sessions()
+msg_service = get_message_service()
 
 # Funzione per gestire il timeout della segnalazione
 async def async_timeout_report_state(client, user_id, timeout_seconds=300):
@@ -19,9 +27,9 @@ async def async_timeout_report_state(client, user_id, timeout_seconds=300):
         await asyncio.sleep(timeout_seconds)
         
         # Verifica se l'utente è ancora nello stato di segnalazione
-        if user_id in report_state:
+        if report_sessions.has_session(user_id):
             # Rimuove lo stato dell'utente
-            del report_state[user_id]
+            report_sessions.delete_session(user_id)
             logging.info(f"[TIMEOUT] Stato di segnalazione rimosso per user_id={user_id} dopo {timeout_seconds} secondi")
             
             # Informa l'utente
@@ -38,14 +46,8 @@ async def async_timeout_report_state(client, user_id, timeout_seconds=300):
 
 # --- Funzione per inviare il menu principale all'utente ---
 async def send_main_menu(client, user_id, msg="🏠 Sei tornato al menù principale. Cosa vuoi pubblicare nella Community?"):
-    buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📆 Evento", callback_data="new_event")],
-        [InlineKeyboardButton("💼 Annuncio di Lavoro", callback_data="new_job")],
-        [InlineKeyboardButton("💡 Call Pubblica per un Progetto", callback_data="new_project")],
-        [InlineKeyboardButton("👤 Il Tuo Profilo Lavorativo", callback_data="new_profile")],
-        [InlineKeyboardButton("🚨 Segnala utente", callback_data="report_user")]
-    ])
-    await send_clean_message(client, user_id, user_id, msg, buttons)
+    keyboard = build_main_menu_keyboard()
+    await send_clean_message(client, user_id, user_id, msg, keyboard)
 
 # ------------------------ BUTTONS CALLBACK HANDLER ------------------------
 # buttons_callback_handler: Gestisce tutte le interazioni con i bottoni InlineKeyboard, 
@@ -69,20 +71,17 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
         logging.info(f"{BLUE}[BUTTONS] Avvio procedura segnalazione per @{username} -> user_id={user_id}{RESET}")
         await callback_query.answer()
         
-        # Crea un nuovo task per il timeout (senza importazione circolare)
-        # Gestiamo il timeout direttamente qui per evitare importazioni circolari
+        # Crea un nuovo task per il timeout
         timeout_task = client.loop.create_task(async_timeout_report_state(client, user_id, 300))
         
         # Imposta lo stato e salva il task di timeout
-        report_state[user_id] = {
+        report_sessions.create_session(user_id, {
             "step": "awaiting_username", 
             "timeout_task": timeout_task
-        }
+        })
         
         # Invia istruzioni all'utente con un bottone per annullare
-        buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("❌ Annulla segnalazione", callback_data="cancel_report")]
-        ])
+        buttons = build_cancel_report_keyboard()
         await client.send_message(
             user_id, 
             "🔎 Invia l'@username dell'utente che vuoi segnalare oppure inoltra un suo messaggio.\n"
@@ -98,17 +97,18 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
         await callback_query.answer("Segnalazione annullata")
         
         # Verifica se l'utente è in stato di segnalazione
-        if user_id in report_state:
+        if report_sessions.has_session(user_id):
+            session = report_sessions.get_session(user_id)
             # Cancella il task di timeout se esiste
-            if "timeout_task" in report_state[user_id]:
+            if session and "timeout_task" in session:
                 try:
-                    report_state[user_id]["timeout_task"].cancel()
+                    session["timeout_task"].cancel()
                     logging.info(f"{BLUE}[REPORT] Task timeout cancellato per @{username} -> user_id={user_id}{RESET}")
                 except Exception as e:
                     logging.error(f"{YELLOW}[REPORT] Errore nella cancellazione del timeout task: {str(e)} di @{username}{RESET}")
             
             # Rimuovi lo stato
-            report_state.pop(user_id, None)
+            report_sessions.delete_session(user_id)
             
             # Torna al menu principale
             await send_main_menu(client, user_id, "❌ Segnalazione annullata. Sei tornato al menù principale.")
@@ -150,15 +150,17 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             await client.send_message(user_id, "❌ Solo gli utenti presenti nel gruppo possono pubblicare. Assicurati di avere un @username pubblico (nel tuo profilo) e di essere nel gruppo (https://t.me/mipiaceunBOTTN).")
             return
         # Prova a eliminare eventuali messaggi da eliminare, se esistono
-        if user_id in user_data:
-            for mid in user_data[user_id].get("messages_to_delete", []):
-                await safe_delete(client, user_id, mid)
-            user_data.pop(user_id, None)
+        if announcement_sessions.has_session(user_id):
+            session = announcement_sessions.get_session(user_id)
+            if session:
+                for mid in session.get("messages_to_delete", []):
+                    await msg_service.delete_message(client, user_id, mid)
+            announcement_sessions.delete_session(user_id)
         await send_main_menu(client, user_id)
         return
 
     # Se la sessione non esiste, gestisci solo le altre callback (ma NON il menu)
-    if uid not in user_data:
+    if not announcement_sessions.has_session(user_id):
         await callback_query.answer("Sessione scaduta o annuncio già gestito. Riavvia il Bot con /start", show_alert=True)
         return
 
@@ -175,7 +177,7 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             except Exception:
                 pass
             # Inizializza la sessione utente SOLO ora
-            user_data[user_id] = {
+            announcement_sessions.create_session(user_id, {
                 "category": cat,
                 "step": 0,
                 "answers": {},
@@ -184,12 +186,12 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                 "messages_to_delete": [],
                 "user_messages_to_delete": [],
                 "timeout_task": None
-            }
+            })
             # Avvia il timeout solo ora
-            import asyncio
             from modules.user_announcements_interactions.announcement_handler import start_compilation_timeout
-            if user_data[user_id]["timeout_task"] is None:
-                user_data[user_id]["timeout_task"] = asyncio.create_task(
+            session = announcement_sessions.get_session(user_id)
+            if session and session.get("timeout_task") is None:
+                session["timeout_task"] = asyncio.create_task(
                     start_compilation_timeout(client, user_id, announce_timeout)
                 )
             # Invia la prima domanda e salva l'ID per poterla eliminare dopo
@@ -202,7 +204,7 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                     [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
                 ])
             )
-            # `send_clean_message` aggiorna già user_data[user_id]['messages_to_delete']
+            # `send_clean_message` aggiorna già session['messages_to_delete']
         # --- Ritorno al menù principale ---
         elif data == "back_to_menu":
             user = await client.get_users(user_id)
@@ -221,10 +223,13 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             if not await is_user_allowed_by_username(client, user):
                 await client.send_message(uid, "❌ Solo gli utenti presenti nel gruppo possono pubblicare. Assicurati di avere un @username pubblico (nel tuo profilo) e di essere nel gruppo (https://t.me/mipiaceunBOTTN).")
                 return
-            info = user_data[uid]
+            info = announcement_sessions.get_session(uid)
+            if not info:
+                await callback_query.answer("Sessione scaduta", show_alert=True)
+                return
             # Pubblica l'annuncio nel gruppo e salva tutti gli id dei messaggi pubblicati
             from modules.user_announcements_interactions.announcement_handler import publish_announcement
-            msg = await publish_announcement(client, uid, info, POINTER_MESSAGE_IDS)
+            msg = await publish_announcement(client, uid, info)
             ann_media_ids = []
             if "last_ann_media_ids" in info:
                 ann_media_ids = info["last_ann_media_ids"]
@@ -277,9 +282,9 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             ])
             confirm_msg = await client.send_message(uid, conferma, reply_markup=menu_btn)
             if confirm_msg:
-                user_data[uid]["confirm_msg_id"] = confirm_msg.id
+                info["confirm_msg_id"] = confirm_msg.id
             # --- Cleanup dati utente dopo pubblicazione e preview con ID ---
-            user_data.pop(uid, None)
+            announcement_sessions.delete_session(uid)
         # --- Annullamento pubblicazione annuncio ---
         elif data.startswith("cancel_"):
             uid = int(data.split("_")[1])
@@ -287,13 +292,14 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             if not await is_user_allowed_by_username(client, user):
                 await client.send_message(uid, "❌ Solo gli utenti presenti nel gruppo possono pubblicare. Assicurati di avere un @username pubblico (nel tuo profilo) e di essere nel gruppo (https://t.me/mipiaceunBOTTN).")
                 return
-            info = user_data.get(uid, {})
-            preview_id = info.get("preview_msg_id")
-            confirm_id = info.get("confirm_msg_id")
-            if preview_id:
-                await safe_delete(client, uid, preview_id)
-            if confirm_id:
-                await safe_delete(client, uid, confirm_id)
+            info = announcement_sessions.get_session(uid)
+            if info:
+                preview_id = info.get("preview_msg_id")
+                confirm_id = info.get("confirm_msg_id")
+                if preview_id:
+                    await msg_service.delete_message(client, uid, preview_id)
+                if confirm_id:
+                    await msg_service.delete_message(client, uid, confirm_id)
             
             # Cleanup con tipo specifico per il log
             from modules.user_announcements_interactions.announcement_handler import cleanup_user_data_and_messages
@@ -328,13 +334,16 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                 await callback_query.answer("❌ Errore durante l'eliminazione.", show_alert=True)
         # --- Torna alla domanda precedente ---
         elif data == "back_to_question":
-            info = user_data[user_id]
+            info = announcement_sessions.get_session(user_id)
+            if not info:
+                await callback_query.answer("Sessione scaduta", show_alert=True)
+                return
             if info["step"] > 0:
                 info["step"] -= 1
                 if info["answers"]:
                     info["answers"].popitem()
                 for mid in info["messages_to_delete"]:
-                    await safe_delete(client, user_id, mid)
+                    await msg_service.delete_message(client, user_id, mid)
                 info["messages_to_delete"].clear()
                 q = CATEGORY_QUESTIONS[info["category"]][info["step"]]["question"]
                 question_data = CATEGORY_QUESTIONS[info["category"]][info["step"]]
@@ -353,7 +362,10 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                 )
         # --- Salta la domanda corrente ---
         elif data == "skip_question":
-            info = user_data[user_id]
+            info = announcement_sessions.get_session(user_id)
+            if not info:
+                await callback_query.answer("Sessione scaduta", show_alert=True)
+                return
             cat = info["category"]
             step = info["step"]
             label_text = CATEGORY_QUESTIONS[cat][step]["label"]
@@ -372,16 +384,19 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             else:
                 from modules.user_announcements_interactions.announcement_handler import send_preview
                 preview_id = await send_preview(client, user_id, info)
-                user_data[user_id]["preview_msg_id"] = preview_id
+                session = announcement_sessions.get_session(user_id)
+                if session:
+                    session["preview_msg_id"] = preview_id
                 confirm_btns = InlineKeyboardMarkup([
                     [InlineKeyboardButton("✅ Conferma", callback_data=f"confirm_{user_id}")],
                     [InlineKeyboardButton("❌ Annulla", callback_data=f"cancel_{user_id}")],
                     [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
                 ])
                 confirm_msg = await client.send_message(user_id, "✅ Confermi di voler pubblicare questo annuncio?", reply_markup=confirm_btns)
-                user_data[user_id]["confirm_msg_id"] = confirm_msg.id
+                if session:
+                    session["confirm_msg_id"] = confirm_msg.id
         else:
-            logging.warning(f"[BUTTONS] Callback non riconosciuta: {data} da utente {uid}")
+            logging.warning(f"[BUTTONS] Callback non riconosciuta: {data} da utente {user_id}")
             await callback_query.answer("❌ Azione non riconosciuta.", show_alert=True)
     except Exception as e:
         logging.exception(f"{YELLOW}Errore nel callback handler. Utente: {uid}, Data: {data}{RESET}")

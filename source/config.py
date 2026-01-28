@@ -58,10 +58,10 @@ announce_timeout = 1200 # in secondi (20 minuti)
 
 report_timeout = 300 # in secondi (5 minuti)
 
-# --- Dizionario per gestire lo stato e i dati di ogni utente ---
+# --- DEPRECATED: Use SessionManager instead ---
+# These are kept for backward compatibility but should not be used in new code
+# Import get_announcement_sessions() and get_report_sessions() from core.session_manager instead
 user_data = {}
-
-# --- Dizionario per gestire lo stato e i dati di ogni segnalazione ---
 report_state = {}
 
 # --- DIZIONARIO DELLE DOMANDE ---

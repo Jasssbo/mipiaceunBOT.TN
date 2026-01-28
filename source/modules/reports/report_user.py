@@ -4,9 +4,14 @@ import logging
 import asyncio
 import tempfile
 from datetime import datetime
-from config import report_state, report_timeout, bot, CHAT_ID, BLUE, RESET, YELLOW, RED, GREEN
+from config import report_timeout, bot, CHAT_ID, BLUE, RESET, YELLOW, RED, GREEN
 from pyrogram import filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from core.session_manager import get_report_sessions
+from core.ui_components import build_back_to_menu_keyboard, build_cancel_report_keyboard
+
+# Get report session manager
+report_sessions = get_report_sessions()
 
 # Percorso del file dei report (assoluto)
 REPORTS_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../reports.json'))
@@ -70,31 +75,31 @@ async def create_timeout_task(client, user_id, report_timeout):
     """Crea un nuovo task di timeout per una segnalazione"""
     # Create and return an asyncio Task that will handle the timeout.
     return client.loop.create_task(timeout_report_state(client, user_id, report_timeout))
+
 async def timeout_report_state(client, user_id, report_timeout):
     """Gestisce il timeout per una segnalazione"""
     await asyncio.sleep(report_timeout)
-    if user_id in report_state:
+    if report_sessions.has_session(user_id):
         logging.info(f"[REPORT] Timeout segnalazione per user_id={user_id}")
         # Remove any stored state for this user and notify them.
         # If a timeout task reference exists, cancel it (defensive).
-        try:
-            if "timeout_task" in report_state.get(user_id, {}):
-                try:
-                    report_state[user_id]["timeout_task"].cancel()
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        session = report_sessions.get_session(user_id)
+        if session and "timeout_task" in session:
+            try:
+                session["timeout_task"].cancel()
+            except Exception:
+                pass
 
-        report_state.pop(user_id, None)
+        report_sessions.delete_session(user_id)
         try:
             await client.send_message(user_id, "⏱️ Tempo scaduto! La segnalazione è stata annullata. Premi di nuovo 'Segnala utente' per riprovare.")
         except Exception:
             # Ignore send errors on timeout
             pass
+
 def is_reporting(client, update, message):
     """Check if the user is in reporting phase.
-    This custom filter verifies if the user exists in the report_state dictionary,
+    This custom filter verifies if the user exists in the report sessions,
     regardless of the specific step they are in.
     
     Args:
@@ -107,12 +112,7 @@ def is_reporting(client, update, message):
             return False
             
         user_id = message.from_user.id
-        result = user_id in report_state
-        
-        if result:
-            #logging.info(f"[FILTER] is_reporting: TRUE per user_id={user_id}, stato={report_state.get(user_id)}")
-            #logging.info(f"{BLUE}[FILTER] is_reporting: TRUE per @{message.from_user.username} (user_id={user_id}){RESET}")
-            pass
+        result = report_sessions.has_session(user_id)
         
         return result
     except Exception as e:
@@ -168,7 +168,8 @@ async def report_user_handler(client, message: Message):
     username = user.username if user.username else f"user{user.id}"
     """Handler principale per gestire il flusso di segnalazione utente"""
     user_id = message.from_user.id
-    state = report_state.get(user_id, {}).get("step")
+    session = report_sessions.get_session(user_id)
+    state = session.get("step") if session else None
     
     #logging.info(f"{BLUE}[REPORT-HANDLER] Messaggio ricevuto da user_id={user_id}, testo='{message.text}'{RESET}")
     # Step 1: attesa username
@@ -209,9 +210,7 @@ async def report_user_handler(client, message: Message):
 
             if not chat:
                 logging.warning(f"{YELLOW}[REPORT] Username non trovato nel gruppo da @{username} user_id={user_id}: '{reported_username}'{RESET}")
-                buttons = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
-                ])
+                buttons = build_back_to_menu_keyboard()
                 await message.reply(
                     f"❌ L'username @{reported_username} non esiste o non appartiene a nessun utente nel gruppo.\n\n"
                     "📝 Puoi:\n"
@@ -228,9 +227,7 @@ async def report_user_handler(client, message: Message):
                     raise ValueError("User not in group")
             except Exception as e:
                 logging.warning(f"{YELLOW}[REPORT] Username trovato ma non presente nel gruppo: @{username} user_id={user_id}: '{reported_username}'{RESET}")
-                buttons = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
-                ])
+                buttons = build_back_to_menu_keyboard()
                 await message.reply(
                     f"❌ L'utente @{reported_username} esiste ma non è presente nel gruppo.\n\n"
                     "📝 Puoi:\n"
@@ -242,9 +239,7 @@ async def report_user_handler(client, message: Message):
 
         except Exception as e:
             logging.warning(f"{YELLOW}[REPORT] Errore nella verifica dell'username da @{username}: '{reported_username}' - Errore: {str(e)}{RESET}")
-            buttons = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
-            ])
+            buttons = build_back_to_menu_keyboard()
             await message.reply(
                 f"❌ Non riesco a verificare l'username @{reported_username}. Assicurati che sia corretto.\n\n"
                 "📝 Puoi:\n"
@@ -256,26 +251,24 @@ async def report_user_handler(client, message: Message):
             return
             
         # Cancella eventuale timeout precedente
-        if "timeout_task" in report_state[user_id]:
+        if session and "timeout_task" in session:
             try:
-                report_state[user_id]["timeout_task"].cancel()
+                session["timeout_task"].cancel()
             except Exception as e:
                 logging.error(f"{YELLOW}[REPORT] Errore nella cancellazione del timeout task: {str(e)}{RESET}")
         
         # Crea nuovo stato con nuovo task di timeout
         timeout_task = await create_timeout_task(client, user_id, report_timeout)
-        report_state[user_id] = {
+        report_sessions.update_session(user_id, {
             "step": "awaiting_reason", 
             "reported_username": reported_username,
             "timeout_task": timeout_task
-        }
+        })
 
         logging.info(f"{BLUE}[REPORT] Passo a attesa motivazione per @{username} -> user_id={user_id}, reported_username={reported_username}{RESET}")
 
         # Aggiungiamo bottone per annullare anche in questo step
-        buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("❌ Annulla segnalazione", callback_data="cancel_report")]
-        ])
+        buttons = build_cancel_report_keyboard()
         
         await message.reply(
             f"✍️ Scrivi una breve spiegazione del motivo della segnalazione per @{reported_username} (almeno 10 caratteri).\n\n"
@@ -300,17 +293,16 @@ async def report_user_handler(client, message: Message):
             await message.reply("❌ Spiegazione troppo breve. Scrivi almeno 10 caratteri sul motivo della segnalazione.")
             return
         
-        reported_username = report_state[user_id].get("reported_username")
+        session = report_sessions.get_session(user_id)
+        reported_username = session.get("reported_username") if session else None
         if not reported_username:
             logging.error(f"{YELLOW}[REPORT] Username mancante per @{username} -> user_id={user_id}{RESET}")
-            buttons = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
-            ])
+            buttons = build_back_to_menu_keyboard()
             await message.reply(
                 "❌ Errore: username da segnalare non trovato. Riavvia la procedura.",
                 reply_markup=buttons
             )
-            report_state.pop(user_id, None)
+            report_sessions.delete_session(user_id)
             return
             
         reporter = message.from_user.username or str(user_id)
@@ -325,19 +317,17 @@ async def report_user_handler(client, message: Message):
             await ban_user_if_needed(client, reported_username)
             
             # Cancella il task di timeout
-            if "timeout_task" in report_state[user_id]:
+            if session and "timeout_task" in session:
                 try:
-                    report_state[user_id]["timeout_task"].cancel()
+                    session["timeout_task"].cancel()
                 except Exception:
                     pass
             
             # Rimuovi lo stato e completa
-            report_state.pop(user_id, None)
+            report_sessions.delete_session(user_id)
             
             # Rispondi all'utente con bottone per tornare al menu
-            buttons = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
-            ])
+            buttons = build_back_to_menu_keyboard()
             await message.reply(
                 f"✅ Segnalazione inviata per @{reported_username}! Grazie per aver contribuito a mantenere la community sicura.",
                 reply_markup=buttons
@@ -345,26 +335,22 @@ async def report_user_handler(client, message: Message):
             
         except Exception as e:
             logging.exception(f"[REPORT] Errore durante il salvataggio della segnalazione: {str(e)}")
-            buttons = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
-            ])
+            buttons = build_back_to_menu_keyboard()
             await message.reply(
                 "❌ Si è verificato un errore durante il salvataggio della segnalazione. Riprova più tardi.",
                 reply_markup=buttons
             )
-            report_state.pop(user_id, None)
+            report_sessions.delete_session(user_id)
         
         return
     
-    # Se l'utente è in report_state ma lo stato non è riconosciuto
+    # Se l'utente è in report_sessions ma lo stato non è riconosciuto
     else:
         logging.warning(f"[REPORT] Stato non riconosciuto per user_id={user_id}: {state}")
-        buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
-        ])
+        buttons = build_back_to_menu_keyboard()
         await message.reply(
             "❌ Stato segnalazione non valido. Riavvia la procedura.",
             reply_markup=buttons
         )
-        report_state.pop(user_id, None)
+        report_sessions.delete_session(user_id)
         return
