@@ -133,10 +133,12 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             
             user = callback_query.from_user
             username = user.username if user.username else f"user{user.id}"
+            
+            first_ann_id = '-'
 
             # Delete announcement messages from the group
             if ann_ids:
-                first_ann_id = ann_ids[0] if ann_ids else '-'
+                first_ann_id = ann_ids[0]
                 # Log prima dell'eliminazione
                 logging.info(f"{BLUE}[ELIMINAZIONE ANNUNCIO] @{username} ha eliminato l'annuncio (ID: {first_ann_id}){RESET}")
                 await client.delete_messages(CHAT_ID, ann_ids)
@@ -156,7 +158,7 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             ])
             await client.send_message(
                 user.id,
-                f"✅ Annuncio eliminato con successo.\nID annuncio: {first_ann_id if ann_ids else '-'}",
+                f"✅ Annuncio eliminato con successo.\nID annuncio: {first_ann_id}",
                 reply_markup=menu_btn
             )
             await callback_query.answer("Hai cancellato il tuo annuncio.", show_alert=False)
