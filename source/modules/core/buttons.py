@@ -234,6 +234,22 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             msg_id = result['message_id']
             ann_media_ids = result['media_ids']
             
+            # Delete old preview messages (without ID) to avoid clutter
+            old_preview_ids = info.get("preview_noid_msg_ids", [])
+            if old_preview_ids:
+                try:
+                    await client.delete_messages(uid, old_preview_ids)
+                    logging.info(f"{GREEN}[CLEANUP] Deleted old preview messages (IDs: {old_preview_ids}) for user {uid}{RESET}")
+                except Exception as e:
+                    logging.warning(f"{YELLOW}[CLEANUP] Could not delete old preview messages: {str(e)}{RESET}")
+            
+            # Delete confirmation buttons message to avoid clutter
+            try:
+                await client.delete_messages(uid, callback_query.message.id)
+                logging.info(f"{GREEN}[CLEANUP] Deleted confirmation buttons message for user {uid}{RESET}")
+            except Exception as e:
+                logging.warning(f"{YELLOW}[CLEANUP] Could not delete confirmation buttons: {str(e)}{RESET}")
+            
             # Invia una nuova preview privata con ID e bottoni, salva tutti gli id
             from modules.user_announcements_interactions.announcement_handler import build_announcement_text
             text = build_announcement_text(info, user, show_id=msg_id)
@@ -269,7 +285,6 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                     sent = await client.send_message(uid, text)
                     preview_with_ids = [sent.id]
             info["preview_msg_id"] = preview_with_ids
-            await client.delete_messages(uid, callback_query.message.id)
             conferma = (
                 f"✅ Annuncio pubblicato!\n"
                 f"ID annuncio: {msg_id}\n"
