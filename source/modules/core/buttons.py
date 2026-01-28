@@ -316,12 +316,21 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                 return
             info = announcement_sessions.get_session(uid)
             if info:
-                preview_id = info.get("preview_msg_id")
+                # Delete preview messages (without ID) - stored as a list
+                preview_noid_ids = info.get("preview_noid_msg_ids", [])
+                for preview_id in preview_noid_ids:
+                    try:
+                        await msg_service.delete_message(client, uid, preview_id)
+                    except Exception as e:
+                        logging.debug(f"Could not delete preview message {preview_id}: {e}")
+                
+                # Delete the confirmation message if it exists
                 confirm_id = info.get("confirm_msg_id")
-                if preview_id:
-                    await msg_service.delete_message(client, uid, preview_id)
                 if confirm_id:
-                    await msg_service.delete_message(client, uid, confirm_id)
+                    try:
+                        await msg_service.delete_message(client, uid, confirm_id)
+                    except Exception as e:
+                        logging.debug(f"Could not delete confirm message {confirm_id}: {e}")
             
             # Cleanup con tipo specifico per il log
             from modules.user_announcements_interactions.announcement_handler import cleanup_user_data_and_messages
