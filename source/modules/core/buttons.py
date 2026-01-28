@@ -47,6 +47,14 @@ async def async_timeout_report_state(client, user_id, timeout_seconds=300):
 # --- Funzione per inviare il menu principale all'utente ---
 async def send_main_menu(client, user_id, msg="🏠 Sei tornato al menù principale. Cosa vuoi pubblicare nella Community?"):
     keyboard = build_main_menu_keyboard()
+    # Ensure a basic session exists for tracking the menu message
+    if not announcement_sessions.has_session(user_id):
+        announcement_sessions.create_session(user_id, {
+            "step": 0,
+            "answers": {},
+            "messages_to_delete": [],
+            "category": None
+        })
     await send_clean_message(client, user_id, user_id, msg, keyboard)
 
 # ------------------------ BUTTONS CALLBACK HANDLER ------------------------
