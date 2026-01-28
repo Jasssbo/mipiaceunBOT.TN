@@ -47,6 +47,14 @@ async def async_timeout_report_state(client, user_id, timeout_seconds=300):
 # --- Funzione per inviare il menu principale all'utente ---
 async def send_main_menu(client, user_id, msg="🏠 Sei tornato al menù principale. Cosa vuoi pubblicare nella Community?"):
     keyboard = build_main_menu_keyboard()
+    # Ensure a basic session exists for tracking the menu message
+    if not announcement_sessions.has_session(user_id):
+        announcement_sessions.create_session(user_id, {
+            "step": 0,
+            "answers": {},
+            "messages_to_delete": [],
+            "category": None
+        })
     await send_clean_message(client, user_id, user_id, msg, keyboard)
 
 # ------------------------ BUTTONS CALLBACK HANDLER ------------------------
@@ -205,17 +213,6 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                 ])
             )
             # `send_clean_message` aggiorna già session['messages_to_delete']
-        # --- Ritorno al menù principale ---
-        elif data == "back_to_menu":
-            user = await client.get_users(user_id)
-            if not await is_user_allowed_by_username(client, user):
-                await client.send_message(user_id, "❌ Solo gli utenti presenti nel gruppo possono pubblicare. Assicurati di avere un @username pubblico (nel tuo profilo) e di essere nel gruppo (https://t.me/mipiaceunBOTTN).")
-                return
-            if user_id in user_data:
-                for mid in user_data[user_id].get("messages_to_delete", []):
-                    await safe_delete(client, user_id, mid)
-                user_data.pop(user_id, None)
-            await send_main_menu(client, user_id)
         # --- Conferma pubblicazione annuncio ---
         elif data.startswith("confirm_"):
             uid = int(data.split("_")[1])

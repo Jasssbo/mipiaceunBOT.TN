@@ -266,7 +266,6 @@ async def collect_data_handler(client, message: Message):
     info["user_messages_to_delete"].append(message.id)
 
     try:
-        info = user_data[user_id]
         cat = info["category"]
         step = info["step"]
 
