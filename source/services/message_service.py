@@ -28,7 +28,7 @@ class MessageService:
     
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential(min=1, max=10),
+        wait=wait_exponential(min=1, max=60),
         retry=retry_if_exception_type((errors.FloodWait, errors.RPCError)),
         reraise=True
     )
@@ -52,8 +52,10 @@ class MessageService:
             logging.debug(f"Cannot delete message {message_id} in chat {chat_id}: forbidden")
             return False
         except errors.FloodWait as e:
-            # Let tenacity handle the retry
-            logging.warning(f"FloodWait {e.value}s when deleting message {message_id}")
+            # Respect Telegram's required wait time
+            logging.warning(f"FloodWait {e.value}s when deleting message {message_id}, waiting...")
+            await asyncio.sleep(e.value)
+            # Let tenacity handle the retry after waiting
             raise
         except errors.RPCError as e:
             # Let tenacity handle the retry
@@ -94,7 +96,7 @@ class MessageService:
     
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential(min=1, max=10),
+        wait=wait_exponential(min=1, max=60),
         retry=retry_if_exception_type((errors.FloodWait, errors.RPCError)),
         reraise=True
     )
@@ -116,7 +118,10 @@ class MessageService:
             msg = await client.send_message(chat_id, text, reply_markup=reply_markup)
             return msg
         except errors.FloodWait as e:
-            logging.warning(f"FloodWait {e.value}s when sending message")
+            # Respect Telegram's required wait time
+            logging.warning(f"FloodWait {e.value}s when sending message, waiting...")
+            await asyncio.sleep(e.value)
+            # Let tenacity handle the retry after waiting
             raise
         except errors.RPCError as e:
             logging.warning(f"RPCError when sending message: {e}")

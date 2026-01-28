@@ -229,15 +229,17 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                 return
             # Pubblica l'annuncio nel gruppo e salva tutti gli id dei messaggi pubblicati
             from modules.user_announcements_interactions.announcement_handler import publish_announcement
-            msg = await publish_announcement(client, uid, info)
-            ann_media_ids = []
-            if "last_ann_media_ids" in info:
-                ann_media_ids = info["last_ann_media_ids"]
-            else:
-                ann_media_ids = [msg.id] if msg else []
+            result = await publish_announcement(client, uid, info)
+            if not result:
+                await callback_query.answer("Errore durante la pubblicazione", show_alert=True)
+                return
+            
+            msg_id = result['message_id']
+            ann_media_ids = result['media_ids']
+            
             # Invia una nuova preview privata con ID e bottoni, salva tutti gli id
             from modules.user_announcements_interactions.announcement_handler import build_announcement_text
-            text = build_announcement_text(info, user, show_id=msg.id)
+            text = build_announcement_text(info, user, show_id=msg_id)
             files = info.get("files", {})
             multi_file_label = None
             multi_file_list = []
@@ -273,7 +275,7 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             await client.delete_messages(uid, callback_query.message.id)
             conferma = (
                 f"✅ Annuncio pubblicato!\n"
-                f"ID annuncio: {msg.id}\n"
+                f"ID annuncio: {msg_id}\n"
                 f"Puoi eliminare questo annuncio in qualsiasi momento premendo il bottone qui sotto."
             )
             menu_btn = InlineKeyboardMarkup([

@@ -114,8 +114,13 @@ async def send_preview(client, user_id: int, info: Dict) -> int:
     info["preview_noid_msg_ids"] = preview_noid_msg_ids
     return msg.id
 
-async def publish_announcement(client, user_id: int, info: Dict) -> Optional[int]:
-    """Pubblica l'annuncio nel topic corretto."""
+async def publish_announcement(client, user_id: int, info: Dict) -> Optional[Dict[str, any]]:
+    """
+    Pubblica l'annuncio nel topic corretto.
+    
+    Returns:
+        Dict with 'message_id' (int) and 'media_ids' (list of ints for media groups)
+    """
     user = await client.get_users(user_id)
     text = build_announcement_text(info, user, show_id=None)
     files = info.get("files", {})
@@ -143,7 +148,10 @@ async def publish_announcement(client, user_id: int, info: Dict) -> Optional[int
                 else:
                     media.append(InputMediaDocument(f["file_id"], caption=text if idx == 0 else None))
             msgs = await client.send_media_group(CHAT_ID, media, reply_to_message_id=thread_id)
-            return msgs[0].id
+            return {
+                'message_id': msgs[0].id,
+                'media_ids': [m.id for m in msgs]
+            }
             
         file_id = info.get("file")
         file_type = info.get("file_type")
@@ -155,7 +163,10 @@ async def publish_announcement(client, user_id: int, info: Dict) -> Optional[int
         else:
             msg = await client.send_message(CHAT_ID, text, reply_to_message_id=thread_id)
         
-        return msg.id
+        return {
+            'message_id': msg.id,
+            'media_ids': [msg.id]
+        }
     except Exception as e:
         logging.error(f"{RED}Errore durante la pubblicazione dell'annuncio: {str(e)}{RESET}")
         return None
