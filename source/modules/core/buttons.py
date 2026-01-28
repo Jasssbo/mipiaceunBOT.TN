@@ -316,7 +316,7 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                 return
             info = announcement_sessions.get_session(uid)
             if info:
-                # Delete preview messages (without ID) - stored as a list
+                # Delete preview messages (that don't show the announcement ID yet)
                 preview_noid_ids = info.get("preview_noid_msg_ids", [])
                 for preview_id in preview_noid_ids:
                     try:
