@@ -4,10 +4,15 @@ Verifica la presenza dell'utente nel gruppo e mostra il menù principale.
 """
 import logging
 from pyrogram import filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
-from config import CHAT_ID, GREEN, RED, YELLOW, RESET, user_data, bot
+from pyrogram.types import Message
+from config import GREEN, RESET, bot
 from modules.permissions.user_permissions import is_user_allowed_by_username
-from modules.user_announcements_interactions.announcement_handler import send_clean_message, is_user_allowed_by_username
+from modules.user_announcements_interactions.utils.message_utils import send_clean_message
+from core.session_manager import get_announcement_sessions
+from core.ui_components import build_main_menu_keyboard
+
+# Get session manager
+sessions = get_announcement_sessions()
 
 # --- Handler per comando /start: verifica presenza utente nel gruppo e mostra menù principale ---
 @bot.on_message(filters.command("start") & filters.private)
@@ -20,7 +25,9 @@ async def start_handler(client, message: Message):
     if not presente:
         await message.reply("❌  Solo gli utenti presenti nel gruppo possono usare il bot. Assicurati di avere un @username pubblico (nel tuo profilo) e di essere nel gruppo (https://t.me/mipiaceunBOTTN).")
         return
-    user_data[user.id] = {
+    
+    # Initialize session for the user
+    sessions.create_session(user.id, {
         "step": 0,
         "answers": {},
         "messages_to_delete": [],
@@ -31,12 +38,7 @@ async def start_handler(client, message: Message):
         "preview_msg_id": None,
         "confirm_msg_id": None,
         "allowed": True
-    }
-    buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📆 Evento", callback_data="new_event")],
-        [InlineKeyboardButton("💼 Annuncio di Lavoro", callback_data="new_job")],
-        [InlineKeyboardButton("💡 Call Pubblica per un Progetto", callback_data="new_project")],
-        [InlineKeyboardButton("👤 Il Tuo Profilo Lavorativo", callback_data="new_profile")],
-        [InlineKeyboardButton("🚨 Segnala utente", callback_data="report_user")]
-    ])
+    })
+    
+    buttons = build_main_menu_keyboard()
     await send_clean_message(client, user.id, message.chat.id, "Benvenuto! Cosa vuoi pubblicare all'interno della Community?", buttons)

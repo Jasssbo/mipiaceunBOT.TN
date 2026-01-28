@@ -14,16 +14,23 @@ from pyrogram.types import (
 )
 from config import (
     GREEN, RED, YELLOW, RESET,
-    CATEGORY_QUESTIONS, user_data, bot,
+    CATEGORY_QUESTIONS, bot,
     CATEGORY_NAMES, announce_timeout,
     CHAT_ID, POINTER_MESSAGE_IDS
 )
 from .utils.message_utils import safe_delete, send_clean_message
 from modules.permissions.topic_permissions import is_user_allowed_by_username
+from core.session_manager import get_announcement_sessions
+from services.message_service import get_message_service
+from core.ui_components import build_main_menu_keyboard
 
 # ------------------------ COSTANTI E CONFIGURAZIONE ------------------------
 # Dizionario per tenere traccia dei messaggi di errore
 error_messages: Dict[int, int] = {}
+
+# Get service instances
+sessions = get_announcement_sessions()
+msg_service = get_message_service()
 
 # ------------------------ FUNZIONI DI SUPPORTO ------------------------
 def build_announcement_text(info: Dict, user, show_id: Optional[int] = None) -> str:
@@ -107,8 +114,13 @@ async def send_preview(client, user_id: int, info: Dict) -> int:
     info["preview_noid_msg_ids"] = preview_noid_msg_ids
     return msg.id
 
-async def publish_announcement(client, user_id: int, info: Dict) -> Optional[int]:
-    """Pubblica l'annuncio nel topic corretto."""
+async def publish_announcement(client, user_id: int, info: Dict) -> Optional[Dict[str, any]]:
+    """
+    Pubblica l'annuncio nel topic corretto.
+    
+    Returns:
+        Dict with 'message_id' (int) and 'media_ids' (list of ints for media groups)
+    """
     user = await client.get_users(user_id)
     text = build_announcement_text(info, user, show_id=None)
     files = info.get("files", {})
@@ -136,7 +148,10 @@ async def publish_announcement(client, user_id: int, info: Dict) -> Optional[int
                 else:
                     media.append(InputMediaDocument(f["file_id"], caption=text if idx == 0 else None))
             msgs = await client.send_media_group(CHAT_ID, media, reply_to_message_id=thread_id)
-            return msgs[0].id
+            return {
+                'message_id': msgs[0].id,
+                'media_ids': [m.id for m in msgs]
+            }
             
         file_id = info.get("file")
         file_type = info.get("file_type")
@@ -148,7 +163,10 @@ async def publish_announcement(client, user_id: int, info: Dict) -> Optional[int
         else:
             msg = await client.send_message(CHAT_ID, text, reply_to_message_id=thread_id)
         
-        return msg.id
+        return {
+            'message_id': msg.id,
+            'media_ids': [msg.id]
+        }
     except Exception as e:
         logging.error(f"{RED}Errore durante la pubblicazione dell'annuncio: {str(e)}{RESET}")
         return None
@@ -156,7 +174,7 @@ async def publish_announcement(client, user_id: int, info: Dict) -> Optional[int
 # ------------------------ GESTIONE DATI UTENTE ------------------------
 async def cleanup_user_data_and_messages(client, user_id: int, reason: str = "", cleanup_type: str = ""):
     """Pulisce i dati utente e i messaggi associati."""
-    info = user_data.get(user_id)
+    info = sessions.get_session(user_id)
     if not info:
         return
 
@@ -176,22 +194,22 @@ async def cleanup_user_data_and_messages(client, user_id: int, reason: str = "",
     except Exception as e:
         logging.error(f"{RED}Errore nel logging della cancellazione annuncio: {str(e)}{RESET}")
 
-    # Cancella messaggi temporanei
+    # Cancella messaggi temporanei usando MessageService
     for mid in info.get("messages_to_delete", []):
         try:
-            await safe_delete(client, user_id, mid)
+            await msg_service.delete_message(client, user_id, mid)
         except Exception:
             pass
     
     for mid in info.get("multi_file_temp_msgs", []):
         try:
-            await safe_delete(client, user_id, mid)
+            await msg_service.delete_message(client, user_id, mid)
         except Exception:
             pass
     
     if user_id in error_messages:
         try:
-            await safe_delete(client, user_id, error_messages[user_id])
+            await msg_service.delete_message(client, user_id, error_messages[user_id])
             del error_messages[user_id]
         except Exception as e:
             logging.error(f"{RED}Errore nell'eliminazione del messaggio di errore durante il cleanup: {str(e)}{RESET}")
@@ -199,23 +217,25 @@ async def cleanup_user_data_and_messages(client, user_id: int, reason: str = "",
 
     for mid in info.get("user_messages_to_delete", []):
         try:
-            await safe_delete(client, user_id, mid)
+            await msg_service.delete_message(client, user_id, mid)
         except Exception:
             pass
 
-    user_data.pop(user_id, None)
+    # Delete session using SessionManager
+    sessions.delete_session(user_id)
     
     msg = "⏱️ Tempo scaduto, i dati inseriti sono stati eliminati. Sei tornato al Menù."
     if reason:
         msg = f"{reason}\n\n{msg}"
-    # Import ritardato per evitare circolarità
-    from modules.core.buttons import send_main_menu
-    await send_main_menu(client, user_id, msg)
+    
+    # Send main menu using ui_components
+    keyboard = build_main_menu_keyboard()
+    await msg_service.send_message(client, user_id, msg, keyboard)
 
 async def start_compilation_timeout(client, user_id: int, timeout: int):
     """Avvia il timer per il timeout della compilazione."""
     await asyncio.sleep(timeout)
-    if user_id in user_data:
+    if sessions.has_session(user_id):
         await cleanup_user_data_and_messages(client, user_id, cleanup_type="timeout")
 
 # ------------------------ HANDLER PRINCIPALE ------------------------
@@ -226,20 +246,24 @@ async def collect_data_handler(client, message: Message):
     user_id = user.id
     
     # Gestisci solo utenti con sessione attiva e categoria impostata
-    if user_id not in user_data or not user_data[user_id].get("category"):
+    if not sessions.has_session(user_id):
+        return
+    
+    info = sessions.get_session(user_id)
+    if not info or not info.get("category"):
         return
 
     # Gestione messaggi di errore precedenti
     if user_id in error_messages:
         try:
-            await safe_delete(client, user_id, error_messages[user_id])
+            await msg_service.delete_message(client, user_id, error_messages[user_id])
             del error_messages[user_id]
         except Exception as e:
             logging.error(f"{RED}Errore nell'eliminazione del messaggio di errore: {str(e)}{RESET}")
 
-    if "user_messages_to_delete" not in user_data[user_id]:
-        user_data[user_id]["user_messages_to_delete"] = []
-    user_data[user_id]["user_messages_to_delete"].append(message.id)
+    if "user_messages_to_delete" not in info:
+        info["user_messages_to_delete"] = []
+    info["user_messages_to_delete"].append(message.id)
 
     try:
         info = user_data[user_id]
@@ -374,19 +398,20 @@ async def proceed_to_next_step(client, user_id: int, info: Dict, cat: str):
     if info.get("messages_to_delete"):
         last_bot_msg = info["messages_to_delete"].pop()
         try:
-            await safe_delete(client, user_id, last_bot_msg)
+            await msg_service.delete_message(client, user_id, last_bot_msg)
             logging.debug(f"Eliminata domanda bot ID: {last_bot_msg}")
         except Exception as e:
             logging.error(f"{RED}Errore nell'eliminazione della domanda del bot: {str(e)}{RESET}")
     
     # Elimina tutti i messaggi dell'utente (inclusi file/foto) uno per uno
-    messages_to_clear = user_data[user_id].get("user_messages_to_delete", [])
+    session = sessions.get_session(user_id)
+    messages_to_clear = session.get("user_messages_to_delete", []) if session else []
     if messages_to_clear:
         logging.debug(f"Tentativo di eliminare {len(messages_to_clear)} messaggi utente")
         deleted_count = 0
         for mid in messages_to_clear:
             try:
-                await safe_delete(client, user_id, mid)
+                await msg_service.delete_message(client, user_id, mid)
                 deleted_count += 1
                 logging.debug(f"✓ Eliminato messaggio utente ID: {mid}")
             except Exception as e:
@@ -395,7 +420,8 @@ async def proceed_to_next_step(client, user_id: int, info: Dict, cat: str):
         if deleted_count > 0:
             logging.info(f"{GREEN}Eliminati {deleted_count}/{len(messages_to_clear)} messaggi utente{RESET}")
     
-    user_data[user_id]["user_messages_to_delete"].clear()
+    if session:
+        session["user_messages_to_delete"] = []
     info["step"] += 1
 
     if info["step"] < len(CATEGORY_QUESTIONS[cat]):
@@ -418,7 +444,9 @@ async def proceed_to_next_step(client, user_id: int, info: Dict, cat: str):
     else:
         # Tutte le domande completate - mostra preview e chiedi conferma
         preview_id = await send_preview(client, user_id, info)
-        user_data[user_id]["preview_msg_id"] = preview_id
+        session = sessions.get_session(user_id)
+        if session:
+            session["preview_msg_id"] = preview_id
         
         confirm_btns = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Conferma", callback_data=f"confirm_{user_id}")],
@@ -427,4 +455,5 @@ async def proceed_to_next_step(client, user_id: int, info: Dict, cat: str):
         ])
             
         confirm_msg_id = await send_clean_message(client, user_id, user_id, "✅ Confermi di voler pubblicare questo annuncio?", confirm_btns)
-        user_data[user_id]["confirm_msg_id"] = confirm_msg_id
+        if session:
+            session["confirm_msg_id"] = confirm_msg_id
