@@ -126,17 +126,31 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
     if data and data.startswith("delete_"):
         try:
             parts = data.split("_")
-            ann_ids = [int(i) for i in parts[1].split(",") if i and i != 'None']
+            # Extract announcement IDs (in the group chat)
+            ann_ids = [int(i) for i in parts[1].split(",") if i and i != 'None'] if len(parts) > 1 else []
+            # Extract preview message IDs (in the private chat)
+            preview_ids = [int(i) for i in parts[2].split(",") if i and i != 'None'] if len(parts) > 2 else []
+            
             user = callback_query.from_user
             username = user.username if user.username else f"user{user.id}"
 
+            # Delete announcement messages from the group
             if ann_ids:
                 first_ann_id = ann_ids[0] if ann_ids else '-'
                 # Log prima dell'eliminazione
                 logging.info(f"{BLUE}[ELIMINAZIONE ANNUNCIO] @{username} ha eliminato l'annuncio (ID: {first_ann_id}){RESET}")
                 await client.delete_messages(CHAT_ID, ann_ids)
 
+            # Delete preview messages from the private chat
+            for preview_id in preview_ids:
+                try:
+                    await msg_service.delete_message(client, user.id, preview_id)
+                except Exception as e:
+                    logging.debug(f"Could not delete preview message {preview_id}: {e}")
+
+            # Delete the confirmation message with the delete button
             await client.delete_messages(user.id, callback_query.message.id)
+            
             menu_btn = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
             ])
@@ -234,6 +248,14 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             msg_id = result['message_id']
             ann_media_ids = result['media_ids']
             
+            # Delete the OLD preview (without ID) before sending the new one
+            old_preview_ids = info.get("preview_noid_msg_ids", [])
+            for old_id in old_preview_ids:
+                try:
+                    await msg_service.delete_message(client, uid, old_id)
+                except Exception as e:
+                    logging.debug(f"Could not delete old preview message {old_id}: {e}")
+            
             # Invia una nuova preview privata con ID e bottoni, salva tutti gli id
             from modules.user_announcements_interactions.announcement_handler import build_announcement_text
             text = build_announcement_text(info, user, show_id=msg_id)
@@ -268,7 +290,7 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                 else:
                     sent = await client.send_message(uid, text)
                     preview_with_ids = [sent.id]
-            info["preview_msg_id"] = preview_with_ids
+            # Delete the confirmation button message (the one asking for confirmation)
             await client.delete_messages(uid, callback_query.message.id)
             conferma = (
                 f"✅ Annuncio pubblicato!\n"
@@ -280,9 +302,8 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
                 [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
             ])
             confirm_msg = await client.send_message(uid, conferma, reply_markup=menu_btn)
-            if confirm_msg:
-                info["confirm_msg_id"] = confirm_msg.id
             # --- Cleanup dati utente dopo pubblicazione e preview con ID ---
+            # Session can be deleted now - preview IDs are stored in the delete button callback data
             announcement_sessions.delete_session(uid)
         # --- Annullamento pubblicazione annuncio ---
         elif data.startswith("cancel_"):
@@ -304,33 +325,6 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
             from modules.user_announcements_interactions.announcement_handler import cleanup_user_data_and_messages
             await cleanup_user_data_and_messages(client, uid, cleanup_type="cancel")
             await send_main_menu(client, uid, "❌ Annuncio annullato. Sei tornato al menù principale.")
-        # --- Eliminazione annuncio tramite bottone ---
-        elif data.startswith("delete_"):
-            try:
-                parts = data.split("_")
-                ann_ids = [int(i) for i in parts[1].split(",") if i and i != 'None']
-                user = callback_query.from_user
-                username = user.username if user.username else f"user{user.id}"
-
-                if ann_ids:
-                    first_ann_id = ann_ids[0] if ann_ids else '-'
-                    # Log prima dell'eliminazione
-                    logging.info(f"{BLUE}[ELIMINAZIONE ANNUNCIO] @{username} ha eliminato l'annuncio (ID: {first_ann_id}){RESET}")
-                    await client.delete_messages(CHAT_ID, ann_ids)
-
-                await client.delete_messages(user.id, callback_query.message.id)
-                menu_btn = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
-                ])
-                await client.send_message(
-                    user.id,
-                    f"✅ Annuncio eliminato con successo.\nID annuncio: {first_ann_id if ann_ids else '-'}",
-                    reply_markup=menu_btn
-                )
-                await callback_query.answer("Hai cancellato il tuo annuncio.", show_alert=False)
-            except Exception as e:
-                logging.exception(f"{YELLOW}Errore imprevisto in fase di eliminazione dell'annuncio tramite bottone.{RESET}")
-                await callback_query.answer("❌ Errore durante l'eliminazione.", show_alert=True)
         # --- Torna alla domanda precedente ---
         elif data == "back_to_question":
             info = announcement_sessions.get_session(user_id)
