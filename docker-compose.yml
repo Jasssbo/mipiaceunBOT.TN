@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    container_name: mipiaceunbot
+    restart: unless-stopped
+    volumes:
+      # Mount bot_infos.env if you want to configure via file outside container
+      - ./bot_infos.env:/app/bot_infos.env
+      # Mount reports.json to persist data
+      - ./reports.json:/app/reports.json
+      # Mount the pyrogram session
+      - ./job_board_bot.session:/app/job_board_bot.session
+      # Mount backups directory
+      - ./backups:/app/backups
+    env_file:
+      - bot_infos.env
+    environment:
+      - TZ=Europe/Rome # Ensure correct timezone for logs and backups
