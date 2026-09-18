@@ -18,5 +18,9 @@ COPY . .
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 
+# Create a non-root user and switch to it for security
+RUN useradd -m botuser && chown -R botuser:botuser /app
+USER botuser
+
 # Command to run the bot
 CMD ["python", "source/main.py"]

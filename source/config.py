@@ -119,7 +119,6 @@ CATEGORY_QUESTIONS = {
             "label": "🖼️ Foto/Lavori:","skippable": True, "multi_file": True, "allowed_types": ["photo"]},
         {"question": "📝 Scrivi una tua breve BIOGRAFIA (opzionale):", "label": "📝 Bio.:", "skippable": True, "allowed_types": ["text"]},
         {"question": "📜 DESCRIVI brevemente le competenze (max. 5 righe):", "label": "📜 Competenze:", "skippable": False, "allowed_types": ["text"]},
-        #{"question": "📎 Puoi allegare il file del TUO CURRICULUM (opzionale):", "label": "📝 Curriculum:", "skippable": True, "allowed_types": ["document"]},
         {"question": "🔗 LINK al tuo Profilo LinkedIn (opzionale):", "label": "🔗 LinkedIn:", "skippable": True, "allowed_types": ["text"]},
         {"question": "📞 Come vuoi essere contattato? (es. @IlTuoNickTelegram). Puoi aggiungere telefono o email se vuoi, ma è opzionale — il tuo @username Telegram è sufficiente:", "label": "📞 Contatti:", "skippable": False, "allowed_types": ["text"]}
     ]

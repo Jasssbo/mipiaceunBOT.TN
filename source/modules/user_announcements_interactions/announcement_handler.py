@@ -24,10 +24,6 @@ from core.session_manager import get_announcement_sessions
 from services.message_service import get_message_service
 from core.ui_components import build_main_menu_keyboard
 
-# ------------------------ COSTANTI E CONFIGURAZIONE ------------------------
-# Dizionario per tenere traccia dei messaggi di errore
-error_messages: Dict[int, int] = {}
-
 # Get service instances
 sessions = get_announcement_sessions()
 msg_service = get_message_service()
@@ -174,9 +170,9 @@ async def publish_announcement(client, user_id: int, info: Dict) -> Optional[Dic
 # ------------------------ GESTIONE DATI UTENTE ------------------------
 async def cleanup_user_data_and_messages(client, user_id: int, reason: str = "", cleanup_type: str = ""):
     """Pulisce i dati utente e i messaggi associati."""
-    info = sessions.get_session(user_id)
-    if not info:
+    if not await sessions.has_session(user_id):
         return
+    info = await sessions.get_session(user_id)
 
     try:
         user = await client.get_users(user_id)
@@ -207,13 +203,14 @@ async def cleanup_user_data_and_messages(client, user_id: int, reason: str = "",
         except Exception:
             pass
     
-    if user_id in error_messages:
+    err_msg_id = await sessions.get_error_message(user_id)
+    if err_msg_id:
         try:
-            await msg_service.delete_message(client, user_id, error_messages[user_id])
-            del error_messages[user_id]
+            await msg_service.delete_message(client, user_id, err_msg_id)
+            await sessions.clear_error_message(user_id)
         except Exception as e:
             logging.error(f"{RED}Errore nell'eliminazione del messaggio di errore durante il cleanup: {str(e)}{RESET}")
-            del error_messages[user_id]
+            await sessions.clear_error_message(user_id)
 
     for mid in info.get("user_messages_to_delete", []):
         try:
@@ -222,7 +219,7 @@ async def cleanup_user_data_and_messages(client, user_id: int, reason: str = "",
             pass
 
     # Delete session using SessionManager
-    sessions.delete_session(user_id)
+    await sessions.delete_session(user_id)
     
     msg = "⏱️ Tempo scaduto, i dati inseriti sono stati eliminati. Sei tornato al Menù."
     if reason:
@@ -235,7 +232,7 @@ async def cleanup_user_data_and_messages(client, user_id: int, reason: str = "",
 async def start_compilation_timeout(client, user_id: int, timeout: int):
     """Avvia il timer per il timeout della compilazione."""
     await asyncio.sleep(timeout)
-    if sessions.has_session(user_id):
+    if await sessions.has_session(user_id):
         await cleanup_user_data_and_messages(client, user_id, cleanup_type="timeout")
 
 # ------------------------ HANDLER PRINCIPALE ------------------------
@@ -246,24 +243,26 @@ async def collect_data_handler(client, message: Message):
     user_id = user.id
     
     # Gestisci solo utenti con sessione attiva e categoria impostata
-    if not sessions.has_session(user_id):
+    if not await sessions.has_session(user_id):
         return
     
-    info = sessions.get_session(user_id)
+    info = await sessions.get_session(user_id)
     if not info or not info.get("category"):
         return
 
     # Gestione messaggi di errore precedenti
-    if user_id in error_messages:
+    err_msg_id = await sessions.get_error_message(user_id)
+    if err_msg_id:
         try:
-            await msg_service.delete_message(client, user_id, error_messages[user_id])
-            del error_messages[user_id]
+            await msg_service.delete_message(client, user_id, err_msg_id)
+            await sessions.clear_error_message(user_id)
         except Exception as e:
             logging.error(f"{RED}Errore nell'eliminazione del messaggio di errore: {str(e)}{RESET}")
 
     if "user_messages_to_delete" not in info:
         info["user_messages_to_delete"] = []
     info["user_messages_to_delete"].append(message.id)
+    await sessions.save_session(info)
 
     try:
         cat = info["category"]
@@ -271,6 +270,7 @@ async def collect_data_handler(client, message: Message):
 
         # Log quando l'utente inizia una nuova pubblicazione
         if step == 0:
+            category_name = CATEGORY_NAMES.get(cat, cat.capitalize() if cat else "")
             logging.info(f"[NUOVO ANNUNCIO] user_id={user.id} ha iniziato la pubblicazione di un {category_name}")
 
         question_data = CATEGORY_QUESTIONS[cat][step]
@@ -287,6 +287,7 @@ async def collect_data_handler(client, message: Message):
                 info["files"][label_text] = []
             if "multi_file_temp_msgs" not in info:
                 info["multi_file_temp_msgs"] = []
+            await sessions.save_session(info)
 
         # Gestione domande multi-file
         if multi_file:
@@ -305,6 +306,7 @@ async def collect_data_handler(client, message: Message):
                 else:
                     info["answers"][label_text] = "Nessun file allegato."
                 
+                await sessions.save_session(info)
                 await proceed_to_next_step(client, user.id, info, cat)
                 return
 
@@ -312,64 +314,35 @@ async def collect_data_handler(client, message: Message):
             if getattr(message, "media_group_id", None) and message.photo:
                 for photo in message.photo if isinstance(message.photo, list) else [message.photo]:
                     await add_file_and_confirm(client, user.id, info, label_text, photo.file_id, "photo")
+                await sessions.save_session(info)
                 return
 
             if message.photo and not getattr(message, "media_group_id", None):
                 await add_file_and_confirm(client, user.id, info, label_text, message.photo.file_id, "photo")
+                await sessions.save_session(info)
                 return
             
             if message.document:
                 await add_file_and_confirm(client, user.id, info, label_text, message.document.file_id, "document")
+                await sessions.save_session(info)
                 return
 
             if message.text:
                 error_msg = await client.send_message(user.id, "❗ Invia una foto o un documento, oppure premi /done per continuare.")
-                error_messages[user_id] = error_msg.id
+                await sessions.set_error_message(user_id, error_msg.id)
                 return
 
             error_msg = await client.send_message(user.id, f"❗ Risposta non valida per questa domanda. Sono ammessi solo: {', '.join(allowed_types)} oppure /done.")
-            error_messages[user_id] = error_msg.id
+            await sessions.set_error_message(user_id, error_msg.id)
             return
 
-        # Controllo tipo di messaggio
-        msg_type = None
-        username = user.username if user.username else f"user{user.id}"
+        from services.validation_service import create_validator_from_question
+        validator = create_validator_from_question(question_data)
+        is_valid, error = await validator.validate(message)
         
-        if message.text and not message.photo and not message.document:
-            msg_type = "text"
-        elif message.photo:
-            msg_type = "photo"
-            if "text" in allowed_types and not "photo" in allowed_types:
-                logging.warning(f"{YELLOW}[ERRORE VALIDAZIONE] @{username} ha inviato una foto quando era richiesto del testo per la domanda '{label_text}'{RESET}")
-        elif message.document:
-            msg_type = "document"
-            if "text" in allowed_types and not "document" in allowed_types:
-                logging.warning(f"{YELLOW}[ERRORE VALIDAZIONE] @{username} ha inviato un documento quando era richiesto del testo per la domanda '{label_text}'{RESET}")
-        elif message.audio:
-            msg_type = "audio"
-            if "text" in allowed_types and not "audio" in allowed_types:
-                logging.warning(f"{YELLOW}[ERRORE VALIDAZIONE] @{username} ha inviato un audio quando era richiesto del testo per la domanda '{label_text}'{RESET}")
-        elif message.voice:
-            msg_type = "voice"
-            if "text" in allowed_types and not "voice" in allowed_types:
-                logging.warning(f"{YELLOW}[ERRORE VALIDAZIONE] @{username} ha inviato una nota vocale quando era richiesto del testo per la domanda '{label_text}'{RESET}")
-        elif message.video:
-            msg_type = "video"
-            if "text" in allowed_types and not "video" in allowed_types:
-                logging.warning(f"{YELLOW}[ERRORE VALIDAZIONE] @{username} ha inviato un video quando era richiesto del testo per la domanda '{label_text}'{RESET}")
-        elif message.sticker:
-            msg_type = "sticker"
-            logging.warning(f"{YELLOW}[ERRORE VALIDAZIONE] @{username} ha inviato uno sticker quando era richiesto del testo per la domanda '{label_text}'{RESET}")
-        elif message.animation:
-            msg_type = "animation"
-            logging.warning(f"{YELLOW}[ERRORE VALIDAZIONE] @{username} ha inviato una GIF quando era richiesto del testo per la domanda '{label_text}'{RESET}")
-        elif not msg_type:
-            msg_type = "unknown"
-            logging.warning(f"{YELLOW}[ERRORE VALIDAZIONE] @{username} ha inviato un tipo di messaggio non supportato per la domanda '{label_text}'{RESET}")
-
-        if msg_type and msg_type not in allowed_types:
-            error_msg = await client.send_message(user.id, f"❗ Risposta non valida per questa domanda. Sono ammessi solo: {', '.join(allowed_types)}.")
-            error_messages[user_id] = error_msg.id
+        if not is_valid:
+            error_msg = await client.send_message(user.id, error)
+            await sessions.set_error_message(user_id, error_msg.id)
             return
 
         # Gestione domande normali
@@ -381,17 +354,9 @@ async def collect_data_handler(client, message: Message):
             if "(opzionale)" in question_text.lower() and message.text.lower().strip() == "/skip":
                 info["answers"][label_text] = "Saltato."
             else:
-                # Validazione lunghezza input
-                if len(message.text.strip()) > MAX_INPUT_LENGTH:
-                    error_msg = await client.send_message(
-                        user.id,
-                        f"❗ Testo troppo lungo. Il massimo è {MAX_INPUT_LENGTH} caratteri. "
-                        f"Il tuo messaggio ha {len(message.text.strip())} caratteri."
-                    )
-                    error_messages[user_id] = error_msg.id
-                    return
                 info["answers"][label_text] = message.text.strip()
 
+        await sessions.save_session(info)
         await proceed_to_next_step(client, user.id, info, cat)
 
     except Exception as e:
@@ -410,7 +375,7 @@ async def proceed_to_next_step(client, user_id: int, info: Dict, cat: str):
             logging.error(f"{RED}Errore nell'eliminazione della domanda del bot: {str(e)}{RESET}")
     
     # Elimina tutti i messaggi dell'utente (inclusi file/foto) uno per uno
-    session = sessions.get_session(user_id)
+    session = await sessions.get_session(user_id)
     messages_to_clear = session.get("user_messages_to_delete", []) if session else []
     if messages_to_clear:
         logging.debug(f"Tentativo di eliminare {len(messages_to_clear)} messaggi utente")
@@ -429,6 +394,7 @@ async def proceed_to_next_step(client, user_id: int, info: Dict, cat: str):
     if session:
         session["user_messages_to_delete"] = []
     info["step"] += 1
+    await sessions.save_session(info)
 
     if info["step"] < len(CATEGORY_QUESTIONS[cat]):
         question_data = CATEGORY_QUESTIONS[cat][info["step"]]
@@ -450,9 +416,10 @@ async def proceed_to_next_step(client, user_id: int, info: Dict, cat: str):
     else:
         # Tutte le domande completate - mostra preview e chiedi conferma
         preview_id = await send_preview(client, user_id, info)
-        session = sessions.get_session(user_id)
+        session = await sessions.get_session(user_id)
         if session:
             session["preview_msg_id"] = preview_id
+            await sessions.save_session(session)
         
         confirm_btns = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Conferma", callback_data=f"confirm_{user_id}")],
@@ -463,3 +430,4 @@ async def proceed_to_next_step(client, user_id: int, info: Dict, cat: str):
         confirm_msg_id = await send_clean_message(client, user_id, user_id, "✅ Confermi di voler pubblicare questo annuncio?", confirm_btns)
         if session:
             session["confirm_msg_id"] = confirm_msg_id
+            await sessions.save_session(session)

@@ -5,11 +5,13 @@ services:
     build: .
     container_name: mipiaceunbot
     restart: unless-stopped
+    depends_on:
+      - redis
     volumes:
       # Mount bot_infos.env if you want to configure via file outside container
       - ./bot_infos.env:/app/bot_infos.env
-      # Mount reports.json to persist data
-      - ./reports.json:/app/reports.json
+      # Mount users_data.db to persist data
+      - ./users_data.db:/app/users_data.db
       # Mount the pyrogram session
       - ./job_board_bot.session:/app/job_board_bot.session
       # Mount backups directory
@@ -18,3 +20,16 @@ services:
       - bot_infos.env
     environment:
       - TZ=Europe/Rome # Ensure correct timezone for logs and backups
+      - REDIS_URL=redis://redis:6379/0
+
+  redis:
+    image: redis:alpine
+    container_name: mipiaceunbot_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:

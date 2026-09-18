@@ -1,51 +1,45 @@
 # mipiaceunBOT - Piattaforma Comunitaria per Professionisti Creativi
 
-![Version](https://img.shields.io/badge/versione-1.0-blue)
+![Version](https://img.shields.io/badge/versione-2.0-blue)
 ![Python](https://img.shields.io/badge/python-3.10+-green)
+![Docker](https://img.shields.io/badge/docker-supported-blue)
 ![License](https://img.shields.io/badge/licenza-AGPL--3.0-yellow)
 
 ## 📑 Panoramica
 
-**mipiaceunBOT** è un assistente Telegram progettato per facilitare la comunicazione e la collaborazione all'interno di comunità creative e professionali. Il bot permette agli utenti di pubblicare e gestire:
+**mipiaceunBOT** è un assistente Telegram asincrono progettato per facilitare la comunicazione e la collaborazione all'interno di comunità creative e professionali. Il bot permette agli utenti di pubblicare e gestire:
 
 - 📆 **Eventi** - Condividere informazioni su eventi, workshop, conferenze
 - 💼 **Annunci di lavoro** - Pubblicare opportunità lavorative o ricerche di collaborazioni
 - 💡 **Call pubbliche per progetti** - Proporre progetti collaborativi e cercare professionisti
 - 👤 **Profili professionali** - Presentarsi alla community con le proprie competenze
 
-Il bot gestisce il flusso di creazione degli annunci con un'interfaccia intuitiva e semplice, garantendo che tutte le informazioni necessarie vengano raccolte prima della pubblicazione nei canali appropriati.
+Il bot gestisce il flusso di creazione degli annunci con un'interfaccia a bottoni InlineKeyboard intuitiva e sicura. L'architettura è costruita per prevenire memory leak e crash grazie a un solido sistema di gestione dello stato basato su Redis.
 
-## 🌟 Funzionalità
+## 🌟 Funzionalità Principali
 
-### Sistema di pubblicazione guidato
-- Interfaccia a bottoni per semplificare la navigazione
-- Form interattivi per raccogliere tutte le informazioni necessarie
-- Supporto per l'upload di immagini, documenti e collegamenti
-- Anteprima dell'annuncio prima della pubblicazione
+### 1. Sistema di Pubblicazione Guidato e Sicuro
+- Moduli di navigazione a bottoni (`InlineKeyboardMarkup`) completamente asincroni.
+- Form interattivi protetti da timeout (TTL gestito nativamente via Redis).
+- Protezione nativa anti-spam (FloodWait interception) a livello globale.
 
-### Organizzazione della community
-- Pubblicazione automatica nei topic appropriati del gruppo
-- Protezione dei topic 
-- Sistema di moderazione con possibilità di segnalare utenti problematici
+### 2. Architettura Dati e Moderazione
+- **Redis Sessions**: Memorizza gli stati di compilazione in memoria temporanea con TTL (Time-To-Live).
+- **SQLite (aiosqlite) + SQLAlchemy**: Memorizza in modo permanente lo storico delle segnalazioni per limitare gli abusi.
+- **Sistema di Segnalazione Utenti**: Gli utenti possono segnalare malintenzionati tramite `/report` o bottoni inline.
+- **Auto-Ban**: Sistema di limitazione che banna gli utenti dopo un determinato numero di segnalazioni da utenti unici.
 
-### Sicurezza e moderazione
-- Verifica che gli utenti siano membri del gruppo
-- Sistema di segnalazione per contenuti inappropriati
-- Timeout automatici per le interazioni incomplete
-
-## 🛠️ Requisiti tecnici
+## 🛠️ Requisiti Tecnici
 
 - **Python 3.10 o superiore**
-- **Librerie Python**:
-  - pyrogram
-  - python-dotenv
-  - asyncio
-  - Altri (vedi `requirements.txt`)
+- **Redis Server** (per il session management in-memory)
 - **Credenziali Telegram**:
-  - API_ID e API_HASH ottenuti da https://my.telegram.org
-  - BOT_TOKEN ottenuto da [@BotFather](https://t.me/BotFather)
+  - `API_ID` e `API_HASH` da https://my.telegram.org
+  - `BOT_TOKEN` da [@BotFather](https://t.me/BotFather)
 
-## 🔧 Configurazione e installazione
+## 🔧 Installazione tramite Docker (Consigliata)
+
+L'utilizzo di `docker-compose` assicura che il bot e il server Redis vengano avviati insieme con un solo comando, garantendo isolamento e stabilità.
 
 ### 1. Clonare il repository
 ```bash
@@ -53,75 +47,48 @@ git clone https://github.com/Jasssbo/mipiaceunBOT.TN.git
 cd mipiaceunBOT
 ```
 
-### 2. Installare le dipendenze
+### 2. Configurare le credenziali
+Crea un file `bot_infos.env` nella directory principale (assicurati che sia ignorato dal version control):
+```env
+API_ID=il_tuo_api_id
+API_HASH=il_tuo_api_hash
+BOT_TOKEN=il_tuo_bot_token
+ADMIN_IDS=12345678,87654321
+CHAT_ID=-1001234567890
+```
+
+### 3. Avviare con Docker Compose
 ```bash
-pip install -r requirements.txt
+docker-compose up -d --build
 ```
+Il bot e Redis saranno ora operativi in background. Usa `docker-compose logs -f` per leggere i log.
 
-### 3. Configurare le credenziali
-Crea un file `bot_infos.env` nella directory principale con:
-```
-API_ID=your_api_id
-API_HASH=your_api_hash
-BOT_TOKEN=your_bot_token
-```
+## 📂 Struttura dell'Architettura (Refactored)
 
-### 4. Personalizzare la configurazione
-Modifica `source/config.py` per:
-- Impostare l'ID della chat del gruppo
-- Configurare i topic e i messaggi di riferimento
-- Personalizzare le domande per i vari tipi di annuncio
+La struttura del progetto segue rigidi principi di Clean Architecture e separazione dei ruoli (SoC):
 
-### 5. Avviare il bot
-```bash
-python source/main.py
-```
+- `source/main.py`: Entry point dell'applicazione asincrona.
+- `source/config.py`: Configurazioni generali e dizionario delle domande (DOM).
+- `source/core/`:
+  - `session_manager.py`: Interfaccia astratta verso il server **Redis**.
+  - `ui_components.py`: Generazione dei bottoni InlineKeyboard.
+- `source/database/`:
+  - `models.py` e `repository.py`: Motore ORM **SQLAlchemy** per il database persistente `users_data.db`.
+- `source/middleware/`:
+  - `permissions.py`: Decoratori di sicurezza (`@require_group_member`).
+- `source/modules/`:
+  - `core/`: Handler centrali (`start.py`, `buttons.py`).
+  - `permissions/`: Controllo accessi dei topic Telegram.
+  - `reports/`: Sistema di `report_user.py` asincrono.
+  - `user_announcements_interactions/`: Handler specifici per il workflow degli annunci.
+- `source/services/`: Servizi globali di messaggistica (`message_service.py`).
 
-## 📂 Struttura del progetto
-
-- `source/config.py`: Configurazione del bot e costanti
-- `source/main.py`: Punto di ingresso dell'applicazione
-- `source/modules/`: Moduli funzionali principali
-  - `buttons.py`: Gestione dei bottoni inline e callback
-  - `start.py`: Handler per il comando /start
-  - `topic_guardian.py`: Protezione e moderazione dei topic
-- `source/modules/user_announcements_interactions/`: Gestione degli annunci
-  - `announcement_compiler.py`: Composizione e pubblicazione annunci
-  - `collect_data.py`: Raccolta informazioni dagli utenti
-  - `report_user.py`: Sistema di segnalazione utenti
-
-## 🤝 Utilizzo
-
-1. Avvia il bot con `/start`
-2. Seleziona il tipo di contenuto che desideri pubblicare
-3. Segui le domande guidate fornendo le informazioni richieste
-4. Visualizza l'anteprima del tuo annuncio
-5. Conferma per pubblicare o modifica se necessario
-
-## 🔒 Privacy e sicurezza
-
-- Il bot registra solamente i dati necessari al suo funzionamento
-- I dati degli utenti non vengono condivisi con terze parti
-- Le segnalazioni vengono gestite in modo confidenziale
-- Fare riferimento al file `TERMS_OF_SERVICE.md` per le condizioni d'uso complete
+## 🤝 Contributi e Linee Guida (Pre-Push)
+Se vuoi contribuire, assicurati di eseguire queste ispezioni prima del push:
+1. **Security Checks**: Nessun `.env` hardcoded.
+2. **Dead Code Elimination**: Elimina eventuali funzioni commentate o moduli importati ma non utilizzati.
+3. **Architettura Asincrona**: Non inserire chiamate sincrone bloccanti all'interno dell'event loop di Pyrogram. Usa sempre `await` e astrazioni asincrone (es: `aiosqlite`).
 
 ## 📄 Licenza
 
 Questo progetto è distribuito con licenza GNU Affero General Public License v3.0 (AGPL-3.0). Vedere il file `LICENSE` per dettagli.
-
-La licenza AGPL garantisce che:
-- Il codice sorgente rimanga aperto e accessibile
-- Chiunque modifichi il bot e lo offra come servizio debba rilasciare il codice sorgente modificato
-- Il tuo lavoro venga riconosciuto e attribuito correttamente
-
-## 👥 Contributori
-
-- [@Jasssbo](https://github.com/Jasssbo) - Sviluppatore principale
-
-## 📞 Contatti
-
-Per segnalazioni, problemi o suggerimenti, apri un issue su GitHub o contatta l'amministratore del gruppo Telegram.
-
----
-
-**Nota**: Questo bot è stato creato per facilitare la comunicazione all'interno di comunità creative e professionali. Qualsiasi utilizzo improprio o per scopi non conformi ai termini di servizio è proibito.

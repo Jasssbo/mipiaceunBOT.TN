@@ -11,20 +11,16 @@ from modules.user_announcements_interactions.utils.message_utils import send_cle
 from core.session_manager import get_announcement_sessions
 from core.ui_components import build_main_menu_keyboard
 
-# Get session manager
 sessions = get_announcement_sessions()
 
-# --- Handler per comando /start: verifica presenza utente nel gruppo e mostra menù principale ---
+from middleware.permissions import require_group_member
+
 @bot.on_message(filters.command("start") & filters.private)
+@require_group_member
 async def start_handler(client, message: Message):
     user = message.from_user
     username = user.username if user.username else user.first_name
-    presente = await is_user_allowed_by_username(client, user)
-    if presente:
-        logging.info(f"[START] L'Utente @{username} ha avviato una conversazione con il bot ed è PRESENTE nel gruppo: {presente}")
-    if not presente:
-        await message.reply("❌  Solo gli utenti presenti nel gruppo possono usare il bot. Assicurati di avere un @username pubblico (nel tuo profilo) e di essere nel gruppo (https://t.me/mipiaceunBOTTN).")
-        return
+    logging.info(f"[START] L'Utente @{username} ha avviato una conversazione con il bot")
     
     # Check if the user is an adult and accepts terms
     # For now, we will show a consent message with inline buttons
@@ -48,7 +44,4 @@ async def start_handler(client, message: Message):
     await send_clean_message(client, user.id, message.chat.id, welcome_text, consent_keyboard)
 
 
-# Aggiungiamo la gestione delle callback per il consenso in questo file o in buttons.py
-# Li intercettiamo globalmente o li gestiamo nel buttons_callback_handler.
-# E' meglio gestirli in buttons_callback_handler per centralizzare.
 

@@ -1,15 +1,15 @@
 # Esclude il file con le credenziali e le segnalazioni degli utenti
-bot_infos.env
+*.env
 reports.json
 reports.json.lock
 
 # Esclude la cartella di Pyrogram se esiste
-job_board_bot.session
-job_board_bot.session-journal
-job_bot.session
+*.session
+*.session-journal
 
 # Esclude file temporanei e cartelle di sistema
 .venv
 __pycache__/
 *.pyc
 .DS_Store
+backup.sh

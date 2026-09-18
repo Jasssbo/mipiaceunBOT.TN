@@ -6,13 +6,7 @@ from .core import send_main_menu
 
 from .permissions import is_user_allowed_by_username
 
-from .reports import (
-    add_report,
-    count_unique_reporters_for_user,
-    load_reports,
-    save_reports,
-    apply_retention_policy
-)
+# Gli handler dei report vengono registrati altrove
 
 from .user_announcements_interactions import (
     # Announcement handling
@@ -33,11 +27,7 @@ __all__ = [
     'is_user_allowed_by_username',
     
     # Reports
-    'add_report',
-    'count_unique_reporters_for_user',
-    'load_reports',
-    'save_reports',
-    'apply_retention_policy',
+    # Handled elsewhere
     
     # Announcements
     'send_preview',

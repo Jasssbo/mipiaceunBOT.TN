@@ -44,8 +44,8 @@ async def send_clean_message(client, user_id: int, chat_id: int, text: str,
         sessions = get_announcement_sessions()
         
         # Delete previously tracked messages for this user
-        if sessions.has_session(user_id):
-            session = sessions.get_session(user_id)
+        if await sessions.has_session(user_id):
+            session = await sessions.get_session(user_id)
             prev_msgs = session.get('messages_to_delete', [])
             for mid in prev_msgs:
                 try:
@@ -53,14 +53,16 @@ async def send_clean_message(client, user_id: int, chat_id: int, text: str,
                 except Exception:
                     pass
             session['messages_to_delete'] = []
+            await sessions.save_session(session)
         
         # Send new message
         msg = await msg_service.send_message(client, chat_id, text, reply_markup)
-        if msg and sessions.has_session(user_id):
-            session = sessions.get_session(user_id)
+        if msg and await sessions.has_session(user_id):
+            session = await sessions.get_session(user_id)
             if 'messages_to_delete' not in session:
                 session['messages_to_delete'] = []
             session['messages_to_delete'].append(msg.id)
+            await sessions.save_session(session)
         
         return msg.id if msg else None
             
