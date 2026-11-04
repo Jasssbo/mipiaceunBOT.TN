@@ -20,11 +20,28 @@ except RuntimeError:
         asyncio.set_event_loop(asyncio.new_event_loop())
 
 from pyrogram import Client
+from pyrogram.storage.file_storage import FileStorage
 import pyrogram.utils
+import sqlite3
 
 # Fix per limitazione di Pyrogram 2.0 sui canali/supergruppi recenti (ID a 64 bit > 2147483647)
 # Evita l'errore "ValueError: Peer id invalid" all'avvio su sessioni pulite.
 pyrogram.utils.MIN_CHANNEL_ID = -1009999999999
+
+# Fix per file .session a 0 byte (es. creati con `touch` per bind-mount Docker) o privi di schema SQLite:
+# Se `FileStorage.open()` trova un file esistente ma vuoto (`no such table: version`),
+# inizializza automaticamente lo schema SQLite tramite `self.create()` anziché andare in crash.
+_orig_file_storage_update = FileStorage.update
+
+
+def _safe_file_storage_update(self):
+    try:
+        _orig_file_storage_update(self)
+    except sqlite3.OperationalError:
+        self.create()
+
+
+FileStorage.update = _safe_file_storage_update
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 

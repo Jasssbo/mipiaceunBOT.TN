@@ -34,9 +34,9 @@ WORKDIR /app
 # Copy application source with proper ownership
 COPY --chown=botuser:botgroup . .
 
-# Pre-create empty session and SQLite DB files with proper permissions
-RUN touch /app/job_board_bot.session /app/users_data.db && \
-     mkdir -p /app/backups && \
+# Create backups directory and ensure /app is writable by botuser for SQLite & Pyrogram session creation
+# NOTE: Never `touch job_board_bot.session` — a 0-byte file lacks SQLite tables (`version`)!
+RUN mkdir -p /app/backups && \
     chown -R botuser:botgroup /app
 
 USER botuser

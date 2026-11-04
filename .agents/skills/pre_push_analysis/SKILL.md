@@ -1,47 +1,63 @@
 ---
 name: Pre-Push Whitehat Analysis
-description: Performs a rigorous security, architectural, static AST, and runtime smoke-test analysis on the Pyrogram bot codebase before pushing to production.
+description: Performs a rigorous security, architectural, anti-AI-slop, Markdown prompt-injection sanitization, static AST, and runtime smoke-test analysis on the Pyrogram bot codebase before pushing to production.
 ---
 
-# Pre-Push Whitehat Analysis & Automated Audit
+# Pre-Push Whitehat, Anti-Slop & Markdown Security Analysis
 
-You are acting as a Senior DevSecOps Engineer, Python Software Architect, and Pyrogram Expert. When asked to perform a pre-push analysis, audit the repository, or diagnose why the bot fails, follow this workflow.
+You are acting as a Senior DevSecOps Engineer, Python Software Architect, and Pyrogram Expert. When asked to perform a pre-push analysis, audit the repository, sanitize `.md` files, or diagnose why the bot fails, follow this workflow.
 
-## Step 1: Run the Automated Codebase Audit Script
+## Step 1: Run the Automated Codebase & Markdown Security Audit Script
 
 Always execute the automated audit script first using the project's virtual environment:
 
 ```bash
+# Standard audit (fails with exit code 1 on any violation)
 ./.venv/bin/python .agents/skills/pre_push_analysis/scripts/audit_codebase.py
+
+# Audit + automatic sanitization of invisible/steganographic Unicode in .md files
+./.venv/bin/python .agents/skills/pre_push_analysis/scripts/audit_codebase.py --sanitize
 ```
 
-The script automatically verifies:
-1. **AST Undefined Name & Import Analysis**: Scans every `.py` file in `source/` to detect missing imports (e.g. `RED`, `YELLOW`, `GREEN`), calls to nonexistent functions (e.g. `create_timeout_task`), bare `except:` clauses, and blocking calls (`time.sleep`).
-2. **Dependency & C-Extension Verification**: Checks `requirements.txt` and imports `pyrogram`, `tgcrypto`, `sqlalchemy.ext.asyncio`, `greenlet`, `aiosqlite`, and `redis`.
-3. **Pyrogram 64-bit Peer ID Patch**: Verifies `pyrogram.utils.MIN_CHANNEL_ID` supports 64-bit supergroup IDs (`-1002461409137`).
-4. **SessionManager & UserSession Integrity**: Tests round-trip serialization and Redis-to-memory fallback for both announcement and report flows (`reported_username`, `reported_user_id`, rate limiting).
-5. **Async Database & Repository Smoke Test**: Tests `init_db()` and `ReportRepository` queries against an isolated in-memory SQLite database.
-6. **Git & Docker Secret Hygiene**: Ensures `.env`, `.session`, and `.db` files are ignored by `.gitignore` and `.dockerignore` and not tracked in Git.
+The script automatically verifies 6 critical layers:
+1. **Markdown Security & Prompt-Injection Sanitization**:
+   - Scans every `.md` file in the repository (`AGENTS.md`, `README.md`, `TERMS_OF_SERVICE.md`, `.agents/**/*.md`) for:
+     - Invisible/steganographic Unicode characters (Zero-Width joiners, Bidi overrides `U+202A`–`U+202E`, Unicode Tag block `U+E0000`–`U+E007F`).
+     - Prompt-injection payloads hidden inside HTML comments (`<!-- ... -->`) or text (`ignore previous instructions`, `system override`, etc.).
+     - Malicious shell execution traps (piping `curl`/`wget` or decoded `base64` payloads directly into `sh`/`bash`).
+2. **Anti-AI-Slop & Cargo-Cult Pattern Detection**:
+   - Detects AI slop such as `touch *.session` in `Dockerfile` (which causes `sqlite3.OperationalError: no such table: version`), placeholder comments (`# rest of code here`, `# as an ai`), and obsolete `reports.json` references in operational scripts.
+3. **AST Static Analysis**:
+   - Scans every `.py` file in `source/` to detect undefined names/missing imports (`NameError`), bare `except:` clauses, and blocking calls (`time.sleep`).
+4. **Dependency & Native C/C++ Extension Verification**:
+   - Checks `requirements.txt` and imports `pyrogram`, `tgcrypto`, `sqlalchemy.ext.asyncio`, `greenlet`, `aiosqlite`, and `redis`.
+5. **Async Runtime Smoke Tests**:
+   - Verifies Pyrogram 64-bit peer ID patch (`-1002461409137`).
+   - Verifies Pyrogram `FileStorage` self-healing on a **0-byte `.session` file** (preventing `no such table: version`).
+   - Verifies `SessionManager` & `UserSession` round-trip serialization + fallback.
+   - Verifies `ReportRepository` async CRUD and GDPR erasure on an in-memory SQLite database.
+6. **Git & Docker Secret Hygiene**:
+   - Verifies `.gitignore` and `.dockerignore` protect `.env`, `.session`, and `.db` files.
 
 ## Step 2: Manual Architectural & Security Review Checklist
 
 1. **Whitehat Security & Leak Prevention (CRITICAL)**
-   - **Secrets Management**: Ensure no API keys, Bot tokens, or credentials exist in source files.
-   - **Callback Ownership Validation**: Verify callbacks like `delete_`, `confirm_`, and `cancel_` check `callback_query.from_user.id == owner_id`.
-   - **Rate Limiting & Abuse**: Verify `FloodWait` handling, `MAX_REPORTS_PER_DAY`, and `MAX_ANNOUNCEMENTS_PER_DAY`.
+   - Ensure no secrets exist in source files.
+   - Verify callback ownership checks (`callback_query.from_user.id == owner_id`).
+   - Verify rate limiting (`FloodWait`, `MAX_REPORTS_PER_DAY`, `MAX_ANNOUNCEMENTS_PER_DAY`).
 
 2. **Data Structure & State Robustness**
-   - **Session Schema**: Confirm every key read/written on `announcement_sessions` or `report_sessions` exists on the `UserSession` dataclass in `source/core/session_manager.py`.
-   - **Concurrency**: Ensure per-user locks protect concurrent `media_group` updates.
+   - Confirm all session keys exist on `UserSession` in `source/core/session_manager.py`.
+   - Confirm per-user `asyncio.Lock` protects concurrent `media_group` updates.
 
 3. **Deployment Readiness (Docker & Render)**
-   - **Dockerfile**: Multi-stage `python:3.12-slim` with build-time import verification.
-   - **Render Web Service Compatibility**: Background health-check HTTP server on `$PORT` in `source/main.py`.
+   - Multi-stage `python:3.12-slim` `Dockerfile` without `touch *.session`.
+   - Background health-check HTTP server on `$PORT` in `source/main.py`.
 
 ## Output Format
 
 Present findings in a structured Markdown report:
-1. **🚨 CRITICAL SECURITY & RUNTIME RISKS**
-2. **🏗️ ARCHITECTURE & STATE FLAWS**
+1. **🚨 CRITICAL SECURITY & PROMPT-INJECTION RISKS**
+2. **🧹 ANTI-AI-SLOP & ARCHITECTURAL FINDINGS**
 3. **🧪 AUTOMATED AUDIT RESULTS**
 4. **✅ ACTIONABLE FIXES APPLIED**
