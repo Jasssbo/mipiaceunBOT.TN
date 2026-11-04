@@ -21,51 +21,46 @@ async def safe_delete(client, chat_id, message_id):
         logging.error(f"{RED}Errore nell'eliminazione del messaggio {message_id}: {str(e)}{RESET}")
 
 
-async def send_clean_message(client, user_id: int, chat_id: int, text: str, 
-                           reply_markup: Optional[InlineKeyboardMarkup] = None) -> Union[int, None]:
+async def send_clean_message(
+    client,
+    user_id: int,
+    chat_id: int,
+    text: str,
+    reply_markup: Optional[InlineKeyboardMarkup] = None,
+    session=None,
+) -> Union[int, None]:
     """
-    DEPRECATED: Use MessageService.send_and_track() instead.
-    Invia un messaggio e gestisce eventuali errori.
-    
-    Args:
-        client: Client Pyrogram
-        user_id: ID dell'utente
-        chat_id: ID della chat
-        text: Testo del messaggio
-        reply_markup: Markup opzionale per i bottoni
-
-    Returns:
-        ID del messaggio inviato o None in caso di errore
+    Invia un messaggio pulendo i messaggi precedenti del bot tracciati nella sessione.
+    Ottimizzato per Upstash Redis: esegue al massimo 1 lettura (se `session` non è già fornita) e 1 sola scrittura finale.
     """
     msg_service = get_message_service()
-    
+
     try:
         from core.session_manager import get_announcement_sessions
         sessions = get_announcement_sessions()
-        
-        # Delete previously tracked messages for this user
-        if await sessions.has_session(user_id):
+
+        if session is None:
             session = await sessions.get_session(user_id)
-            prev_msgs = session.get('messages_to_delete', [])
+
+        # Delete previously tracked messages for this user
+        if session is not None:
+            prev_msgs = list(session.get("messages_to_delete", []))
             for mid in prev_msgs:
                 try:
                     await msg_service.delete_message(client, user_id, mid)
                 except Exception:
                     pass
-            session['messages_to_delete'] = []
-            await sessions.save_session(session)
-        
+            session["messages_to_delete"] = []
+
         # Send new message
         msg = await msg_service.send_message(client, chat_id, text, reply_markup)
-        if msg and await sessions.has_session(user_id):
-            session = await sessions.get_session(user_id)
-            if 'messages_to_delete' not in session:
-                session['messages_to_delete'] = []
-            session['messages_to_delete'].append(msg.id)
+        if session is not None:
+            if msg:
+                session["messages_to_delete"] = [msg.id]
             await sessions.save_session(session)
-        
+
         return msg.id if msg else None
-            
+
     except Exception as e:
         logging.error(f"{YELLOW}Errore nell'invio del messaggio all'utente {user_id}: {str(e)}{RESET}")
         return None

@@ -66,11 +66,17 @@ def cancel_compilation_timeout(user_id: int) -> None:
         task.cancel()
 
 
-async def reschedule_compilation_timeout(client, user_id: int, timeout: int = announce_timeout) -> None:
+async def reschedule_compilation_timeout(
+    client,
+    user_id: int,
+    timeout: int = announce_timeout,
+    sync_redis_ttl: bool = True,
+) -> None:
     """Avvia o riavvia il timer di inattività (10 minuti) per la compilazione dell'annuncio."""
     cancel_compilation_timeout(user_id)
-    # Imposta il TTL su Redis con un margine di +30s così il task invia l'avviso e pulisce i messaggi prima dell'eviction
-    await sessions.schedule_cleanup(user_id, timeout + 30)
+    if sync_redis_ttl:
+        # Imposta il TTL su Redis con un margine di +30s così il task invia l'avviso e pulisce i messaggi prima dell'eviction
+        await sessions.schedule_cleanup(user_id, timeout + 30)
     _timeout_tasks[user_id] = asyncio.create_task(
         start_compilation_timeout(client, user_id, timeout)
     )
@@ -241,15 +247,13 @@ async def publish_announcement(client, user_id: int, info: Dict) -> Optional[Dic
 async def cleanup_user_data_and_messages(client, user_id: int, reason: str = "", cleanup_type: str = ""):
     """Pulisce i dati utente e i messaggi associati."""
     cancel_compilation_timeout(user_id)
-    if not await sessions.has_session(user_id):
-        return
     info = await sessions.get_session(user_id)
     if not info:
         return
 
     try:
         user = await client.get_users(user_id)
-        username = user.username if user.username else f"user{user.id}"
+        username = _sanitize_log(user.username if user.username else f"user{user.id}", max_len=40)
         category = info.get("category")
         if category:
             category_name = CATEGORY_NAMES.get(category, category.capitalize() if category else "")
@@ -276,14 +280,12 @@ async def cleanup_user_data_and_messages(client, user_id: int, reason: str = "",
         except Exception:
             pass
     
-    err_msg_id = await sessions.get_error_message(user_id)
+    err_msg_id = info.get("error_msg_id")
     if err_msg_id:
         try:
             await msg_service.delete_message(client, user_id, err_msg_id)
-            await sessions.clear_error_message(user_id)
         except Exception as e:
             logging.error(f"{RED}Errore nell'eliminazione del messaggio di errore durante il cleanup: {str(e)}{RESET}")
-            await sessions.clear_error_message(user_id)
 
     for mid in info.get("user_messages_to_delete", []):
         try:
@@ -291,7 +293,7 @@ async def cleanup_user_data_and_messages(client, user_id: int, reason: str = "",
         except Exception:
             pass
 
-    # Delete session using SessionManager
+    # Delete session using SessionManager (1 solo comando DEL su Redis)
     await sessions.delete_session(user_id)
     
     # Se è un annullamento esplicito, il messaggio del menu viene già inviato da buttons.py
@@ -310,11 +312,10 @@ async def start_compilation_timeout(client, user_id: int, timeout: int):
     """Avvia il timer per il timeout della compilazione e rilascia sempre il riferimento al task in memoria."""
     try:
         await asyncio.sleep(timeout)
-        if await sessions.has_session(user_id):
-            info = await sessions.get_session(user_id)
-            # Verifica che ci sia effettivamente una compilazione attiva (category != None)
-            if info and info.get("category"):
-                await cleanup_user_data_and_messages(client, user_id, cleanup_type="timeout")
+        info = await sessions.get_session(user_id)
+        # Verifica che ci sia effettivamente una compilazione attiva (category != None)
+        if info and info.get("category"):
+            await cleanup_user_data_and_messages(client, user_id, cleanup_type="timeout")
     except asyncio.CancelledError:
         pass
     finally:
@@ -325,38 +326,35 @@ async def start_compilation_timeout(client, user_id: int, timeout: int):
 @bot.on_message(filters.private & ~filters.command(["start", "privacy", "informativa", "informativa_privacy", "terms", "termini", "tos", "my_data", "miei_dati", "erase_my_data", "erase", "gdpr_erase", "admin_reports", "admin_segnalazioni", "admin_ban", "admin_unban", "admin_clear_reports"]))
 @require_group_member
 async def collect_data_handler(client, message: Message):
-    """Handler principale per la raccolta dati utente."""
+    """Handler principale per la raccolta dati utente (ottimizzato a 1 GET + 1 SET su Upstash Redis per step)."""
     user = message.from_user
     if not user:
         return
     user_id = user.id
     username = _sanitize_log(user.username if user.username else f"user{user_id}", max_len=40)
+    session_ttl = announce_timeout + 30
 
     async with _get_user_lock(user_id):
-        # Gestisci solo utenti con sessione attiva e categoria impostata
-        if not await sessions.has_session(user_id):
-            return
-        
+        # 1 sola lettura Redis (GET) per verificare e caricare la sessione
         info = await sessions.get_session(user_id)
         if not info or not info.get("category"):
             return
 
-        # Rinnova il timeout di 10 minuti ad ogni interazione dell'utente
-        await reschedule_compilation_timeout(client, user_id, announce_timeout)
+        # Rinnova il task di timeout in-memory (il TTL Redis viene rinnovato atomicamente nel save_session finale)
+        await reschedule_compilation_timeout(client, user_id, announce_timeout, sync_redis_ttl=False)
 
-        # Gestione messaggi di errore precedenti
-        err_msg_id = await sessions.get_error_message(user_id)
+        # Gestione messaggi di errore precedenti salvati direttamente in UserSession (0 comandi Redis extra)
+        err_msg_id = info.get("error_msg_id")
         if err_msg_id:
             try:
                 await msg_service.delete_message(client, user_id, err_msg_id)
-                await sessions.clear_error_message(user_id)
             except Exception as e:
                 logging.error(f"{RED}Errore nell'eliminazione del messaggio di errore: {str(e)}{RESET}")
+            info["error_msg_id"] = None
 
         if "user_messages_to_delete" not in info:
             info["user_messages_to_delete"] = []
         info["user_messages_to_delete"].append(message.id)
-        await sessions.save_session(info)
 
         try:
             cat = info["category"]
@@ -370,7 +368,7 @@ async def collect_data_handler(client, message: Message):
             multi_file = question_data.get("multi_file", False)
             allowed_types = question_data.get("allowed_types", ["text"])
 
-            # Inizializzazione files e multi_file_temp_msgs
+            # Inizializzazione files e multi_file_temp_msgs in memoria
             if multi_file:
                 if "files" not in info:
                     info["files"] = {}
@@ -378,7 +376,6 @@ async def collect_data_handler(client, message: Message):
                     info["files"][label_text] = []
                 if "multi_file_temp_msgs" not in info:
                     info["multi_file_temp_msgs"] = []
-                await sessions.save_session(info)
 
             # Gestione domande multi-file
             if multi_file:
@@ -402,7 +399,6 @@ async def collect_data_handler(client, message: Message):
                         f"{GREEN}[COMPILAZIONE {category_name}] @{username} (step {step + 1}/{total_steps}) "
                         f"ha completato '{label_text}' -> {info['answers'][label_text]}{RESET}"
                     )
-                    await sessions.save_session(info)
                     await proceed_to_next_step(client, user.id, info, cat)
                     return
 
@@ -412,7 +408,8 @@ async def collect_data_handler(client, message: Message):
                         user.id,
                         f"⚠️ Hai raggiunto il limite massimo di {MAX_FILES_PER_ANNOUNCEMENT} file per annuncio. Premi /done per continuare.",
                     )
-                    await sessions.set_error_message(user_id, error_msg.id)
+                    info["error_msg_id"] = error_msg.id
+                    await sessions.save_session(info, expire=session_ttl)
                     return
 
                 # Gestione media group
@@ -424,7 +421,7 @@ async def collect_data_handler(client, message: Message):
                         f"{BLUE}[COMPILAZIONE {category_name}] @{username} (step {step + 1}/{total_steps}) "
                         f"ha caricato foto per '{label_text}' (totale: {len(info['files'][label_text])}){RESET}"
                     )
-                    await sessions.save_session(info)
+                    await sessions.save_session(info, expire=session_ttl)
                     return
 
                 if message.photo and not getattr(message, "media_group_id", None):
@@ -433,7 +430,7 @@ async def collect_data_handler(client, message: Message):
                         f"{BLUE}[COMPILAZIONE {category_name}] @{username} (step {step + 1}/{total_steps}) "
                         f"ha caricato una foto per '{label_text}' (totale: {len(info['files'][label_text])}){RESET}"
                     )
-                    await sessions.save_session(info)
+                    await sessions.save_session(info, expire=session_ttl)
                     return
                 
                 if message.document:
@@ -442,16 +439,18 @@ async def collect_data_handler(client, message: Message):
                         f"{BLUE}[COMPILAZIONE {category_name}] @{username} (step {step + 1}/{total_steps}) "
                         f"ha caricato un documento per '{label_text}' (totale: {len(info['files'][label_text])}){RESET}"
                     )
-                    await sessions.save_session(info)
+                    await sessions.save_session(info, expire=session_ttl)
                     return
 
                 if message.text:
                     error_msg = await client.send_message(user.id, "❗ Invia una foto o un documento, oppure premi /done per continuare.")
-                    await sessions.set_error_message(user_id, error_msg.id)
+                    info["error_msg_id"] = error_msg.id
+                    await sessions.save_session(info, expire=session_ttl)
                     return
 
                 error_msg = await client.send_message(user.id, f"❗ Risposta non valida per questa domanda. Sono ammessi solo: {', '.join(allowed_types)} oppure /done.")
-                await sessions.set_error_message(user_id, error_msg.id)
+                info["error_msg_id"] = error_msg.id
+                await sessions.save_session(info, expire=session_ttl)
                 return
 
             from services.validation_service import create_validator_from_question
@@ -460,7 +459,8 @@ async def collect_data_handler(client, message: Message):
             
             if not is_valid:
                 error_msg = await client.send_message(user.id, error)
-                await sessions.set_error_message(user_id, error_msg.id)
+                info["error_msg_id"] = error_msg.id
+                await sessions.save_session(info, expire=session_ttl)
                 return
 
             # Gestione domande normali
@@ -488,7 +488,6 @@ async def collect_data_handler(client, message: Message):
                         f"ha inserito '{label_text}' -> \"{preview_val}\"{RESET}"
                     )
 
-            await sessions.save_session(info)
             await proceed_to_next_step(client, user.id, info, cat)
 
         except Exception as e:
@@ -496,7 +495,8 @@ async def collect_data_handler(client, message: Message):
             await cleanup_user_data_and_messages(client, user.id, reason="❗ Si è verificato un errore durante la compilazione dell'annuncio.")
 
 async def proceed_to_next_step(client, user_id: int, info: Dict, cat: str):
-    """Procede al prossimo step della raccolta dati."""
+    """Procede al prossimo step della raccolta dati con 1 sola scrittura finale su Redis."""
+    session_ttl = announce_timeout + 30
     # Elimina l'ultima domanda del bot
     if info.get("messages_to_delete"):
         last_bot_msg = info["messages_to_delete"].pop()
@@ -520,7 +520,6 @@ async def proceed_to_next_step(client, user_id: int, info: Dict, cat: str):
     
     info["user_messages_to_delete"] = []
     info["step"] += 1
-    await sessions.save_session(info)
 
     if info["step"] < len(CATEGORY_QUESTIONS[cat]):
         question_data = CATEGORY_QUESTIONS[cat][info["step"]]
@@ -530,24 +529,21 @@ async def proceed_to_next_step(client, user_id: int, info: Dict, cat: str):
             buttons.insert(0, [InlineKeyboardButton("⏭️ Salta questa domanda", callback_data="skip_question")])
         
         buttons.append([InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")])
-        # Usa send_clean_message che elimina i messaggi bot precedenti e registra il nuovo
-        sent_id = await send_clean_message(
+        # Passa `session=info` a send_clean_message così esegue 0 GET e 1 solo SET finale
+        await send_clean_message(
             client,
             user_id,
             user_id,
             question_data["question"],
-            InlineKeyboardMarkup(buttons)
+            InlineKeyboardMarkup(buttons),
+            session=info,
         )
-        # send_clean_message aggiorna info['messages_to_delete'] automaticamente
     else:
         # Tutte le domande completate - mostra preview e chiedi conferma
         category_name = CATEGORY_NAMES.get(cat, cat.capitalize() if cat else "")
         logging.info(f"{BLUE}[ANTEPRIMA {category_name}] user_id={user_id} ha completato tutte le domande, invio anteprima di conferma{RESET}")
         preview_id = await send_preview(client, user_id, info)
-        session = await sessions.get_session(user_id)
-        if session:
-            session["preview_msg_id"] = preview_id
-            await sessions.save_session(session)
+        info["preview_msg_id"] = preview_id
         
         confirm_btns = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Conferma", callback_data=f"confirm_{user_id}")],
@@ -555,7 +551,8 @@ async def proceed_to_next_step(client, user_id: int, info: Dict, cat: str):
             [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
         ])
             
-        confirm_msg_id = await send_clean_message(client, user_id, user_id, "✅ Confermi di voler pubblicare questo annuncio?", confirm_btns)
-        if session:
-            session["confirm_msg_id"] = confirm_msg_id
-            await sessions.save_session(session)
+        confirm_msg = await msg_service.send_message(client, user_id, "✅ Confermi di voler pubblicare questo annuncio?", confirm_btns)
+        if confirm_msg:
+            info["confirm_msg_id"] = confirm_msg.id
+            info["messages_to_delete"] = [confirm_msg.id]
+        await sessions.save_session(info, expire=session_ttl)

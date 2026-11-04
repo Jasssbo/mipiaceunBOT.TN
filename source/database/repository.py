@@ -37,21 +37,25 @@ class ReportRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def _ensure_initialized(self) -> None:
+        if self.session.bind is engine:
+            await init_db()
+
     async def add(self, report: Report) -> Report:
-        await init_db()
+        await self._ensure_initialized()
         self.session.add(report)
         await self.session.commit()
         return report
 
     async def get_count_for_user(self, user_id: int) -> int:
-        await init_db()
+        await self._ensure_initialized()
         result = await self.session.execute(
             select(func.count()).where(Report.reported_user_id == user_id)
         )
         return result.scalar() or 0
 
     async def count_unique_reporters_for_user(self, user_id: int) -> int:
-        await init_db()
+        await self._ensure_initialized()
         result = await self.session.execute(
             select(func.count(func.distinct(Report.reporter_user_id)))
             .where(Report.reported_user_id == user_id)
@@ -59,7 +63,7 @@ class ReportRepository:
         return result.scalar() or 0
 
     async def count_reports_today_by_user(self, reporter_id: int) -> int:
-        await init_db()
+        await self._ensure_initialized()
         today_start = datetime.now(timezone.utc).replace(
             hour=0, minute=0, second=0, microsecond=0, tzinfo=None
         )
@@ -71,7 +75,7 @@ class ReportRepository:
         return result.scalar() or 0
 
     async def has_already_reported(self, reporter_id: int, reported_user_id: int) -> bool:
-        await init_db()
+        await self._ensure_initialized()
         result = await self.session.execute(
             select(func.count())
             .where(Report.reporter_user_id == reporter_id)
@@ -80,7 +84,7 @@ class ReportRepository:
         return (result.scalar() or 0) > 0
 
     async def apply_retention_policy(self, days: int) -> int:
-        await init_db()
+        await self._ensure_initialized()
         cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
         result = await self.session.execute(
             delete(Report).where(Report.timestamp < cutoff)
@@ -89,7 +93,7 @@ class ReportRepository:
         return result.rowcount or 0
 
     async def get_reports_for_user(self, user_id: int):
-        await init_db()
+        await self._ensure_initialized()
         result = await self.session.execute(
             select(Report).where(
                 or_(
@@ -101,7 +105,7 @@ class ReportRepository:
         return result.scalars().all()
 
     async def erase_user_data(self, user_id: int) -> int:
-        await init_db()
+        await self._ensure_initialized()
         result = await self.session.execute(
             delete(Report).where(
                 or_(
@@ -114,14 +118,14 @@ class ReportRepository:
         return result.rowcount or 0
 
     async def get_recent_reports(self, limit: int = 20):
-        await init_db()
+        await self._ensure_initialized()
         result = await self.session.execute(
             select(Report).order_by(Report.timestamp.desc()).limit(limit)
         )
         return result.scalars().all()
 
     async def clear_user_reports(self, reported_user_id: int) -> int:
-        await init_db()
+        await self._ensure_initialized()
         result = await self.session.execute(
             delete(Report).where(Report.reported_user_id == reported_user_id)
         )
@@ -129,7 +133,7 @@ class ReportRepository:
         return result.rowcount or 0
 
     async def get_total_count(self) -> int:
-        await init_db()
+        await self._ensure_initialized()
         result = await self.session.execute(select(func.count(Report.id)))
         return result.scalar() or 0
 

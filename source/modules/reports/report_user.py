@@ -352,11 +352,10 @@ async def report_user_handler(client, message: Message):
     if not user:
         return
     user_id = user.id
-    if not await report_sessions.has_session(user_id):
-        return
-        
     session = await report_sessions.get_session(user_id)
-    state = session.get("step") if session else None
+    if not session:
+        return
+    state = session.get("step")
 
     # Step 1: attesa username
     if state == "awaiting_username":
@@ -481,13 +480,11 @@ async def report_user_handler(client, message: Message):
             await report_sessions.delete_session(user_id)
             return
 
-        # Aggiorna stato e imposta timeout su Redis/fallback
-        await report_sessions.update_session(user_id, {
-            "step": "awaiting_reason",
-            "reported_username": reported_username,
-            "reported_user_id": reported_user_id
-        })
-        await report_sessions.schedule_cleanup(user_id, report_timeout)
+        # Aggiorna stato e imposta timeout su Redis/fallback in 1 sola scrittura atomica
+        session["step"] = "awaiting_reason"
+        session["reported_username"] = reported_username
+        session["reported_user_id"] = reported_user_id
+        await report_sessions.save_session(session, expire=report_timeout)
 
         logging.info(f"[REPORT] user_id={user_id} procede alla motivazione per reported_user_id={reported_user_id}")
 

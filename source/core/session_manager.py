@@ -9,21 +9,27 @@ import time
 from typing import Dict, Optional, Any, List, Union, Tuple
 from datetime import datetime, timezone
 from dataclasses import dataclass, field, asdict, fields
+from cachetools import TTLCache
 from redis.asyncio import Redis, from_url
 from redis.exceptions import RedisError
 
-# Redis configuration
-redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-try:
-    redis_client: Optional[Redis] = from_url(
-        redis_url,
-        decode_responses=True,
-        socket_connect_timeout=3,
-        socket_timeout=3,
-    )
-except Exception as e:
-    logging.error(f"[REDIS] Configurazione client Redis fallita: {e}")
-    redis_client = None
+# Redis configuration (optimized for Upstash Serverless TLS with health_check_interval)
+redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0").strip()
+if redis_url.lower() in ("", "none", "memory", "memory://"):
+    redis_client: Optional[Redis] = None
+else:
+    try:
+        redis_client = from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=3,
+            socket_timeout=3,
+            retry_on_timeout=True,
+            health_check_interval=30,
+        )
+    except Exception as e:
+        logging.error(f"[REDIS] Configurazione client Redis fallita: {e}")
+        redis_client = None
 
 
 @dataclass
@@ -43,6 +49,7 @@ class UserSession:
     confirm_msg_id: Optional[int] = None
     preview_noid_msg_ids: List[int] = field(default_factory=list)
     last_bot_message_id: Optional[int] = None
+    error_msg_id: Optional[int] = None
     allowed: bool = True
 
     # Single file tracking
@@ -85,8 +92,10 @@ class SessionManager:
 
     _redis_down_until: float = 0.0
     _fallback_warned: bool = False
-    # Shared in-memory fallback store: key -> (value_str, expire_timestamp)
+    # Shared in-memory write-through & fallback store: key -> (value_str, expire_timestamp)
     _memory_store: Dict[str, Tuple[str, Optional[float]]] = {}
+    # Negative lookup cache per evitare GET ripetitive su Redis per sessioni inesistenti (es. report_sessions)
+    _known_absent: TTLCache = TTLCache(maxsize=2000, ttl=600)
     _ops_counter: int = 0
 
     def __init__(self, prefix: str):
@@ -148,19 +157,32 @@ class SessionManager:
 
     async def _kv_get(self, key: str) -> Optional[str]:
         self._mem_periodic_sweep()
+        self._mem_cleanup_key(key)
+        # 1. Fast path: se la chiave è già nella cache write-through in RAM, restituiscila a costo 0 comandi Redis
+        entry = SessionManager._memory_store.get(key)
+        if entry is not None:
+            return entry[0]
+        # 2. Se sappiamo già che la sessione non esiste (es. report_sessions durante la compilazione annunci), 0 comandi Redis
+        if key in SessionManager._known_absent:
+            return None
+        # 3. Cold-start miss (es. dopo riavvio container su Render): interroga Redis e popola la cache locale
         if self._is_redis_available():
             try:
                 val = await self.redis.get(key)
                 SessionManager._fallback_warned = False
+                if val is not None:
+                    SessionManager._memory_store[key] = (val, time.time() + self.DEFAULT_SESSION_TTL)
+                else:
+                    SessionManager._known_absent[key] = True
                 return val
             except (RedisError, OSError) as e:
                 self._handle_redis_failure(e)
-        self._mem_cleanup_key(key)
-        entry = SessionManager._memory_store.get(key)
-        return entry[0] if entry else None
+        SessionManager._known_absent[key] = True
+        return None
 
     async def _kv_set(self, key: str, value: str, ex: Optional[int] = None) -> None:
         self._mem_periodic_sweep()
+        SessionManager._known_absent.pop(key, None)
         existing = SessionManager._memory_store.get(key)
         if ex is not None:
             exp_ts = time.time() + ex
@@ -179,18 +201,11 @@ class SessionManager:
                 self._handle_redis_failure(e)
 
     async def _kv_exists(self, key: str) -> bool:
-        if self._is_redis_available():
-            try:
-                res = await self.redis.exists(key) > 0
-                SessionManager._fallback_warned = False
-                return res
-            except (RedisError, OSError) as e:
-                self._handle_redis_failure(e)
-        self._mem_cleanup_key(key)
-        return key in SessionManager._memory_store
+        return (await self._kv_get(key)) is not None
 
     async def _kv_delete(self, key: str) -> None:
         SessionManager._memory_store.pop(key, None)
+        SessionManager._known_absent[key] = True
         if self._is_redis_available():
             try:
                 await self.redis.delete(key)
@@ -220,14 +235,19 @@ class SessionManager:
                 self._handle_redis_failure(e)
 
     # --- High-level Session API ---
-    async def create_session(self, user_id: int, initial_data: Optional[Dict[str, Any]] = None) -> UserSession:
-        """Create or reset a session for a user."""
+    async def create_session(
+        self,
+        user_id: int,
+        initial_data: Optional[Dict[str, Any]] = None,
+        expire: Optional[int] = None,
+    ) -> UserSession:
+        """Create or reset a session for a user in a single KV write."""
         session = UserSession(user_id=user_id)
         if initial_data:
             for key, value in initial_data.items():
                 if key in _VALID_SESSION_FIELDS:
                     setattr(session, key, value)
-        await self.save_session(session)
+        await self.save_session(session, expire=expire)
         return session
 
     async def get_session(self, user_id: int) -> Optional[UserSession]:
@@ -248,15 +268,20 @@ class SessionManager:
         key = self._key(session.user_id)
         await self._kv_set(key, json.dumps(asdict(session)), ex=expire)
 
-    async def update_session(self, user_id: int, data: Dict[str, Any]) -> None:
+    async def update_session(
+        self,
+        user_id: int,
+        data: Dict[str, Any],
+        expire: Optional[int] = None,
+    ) -> None:
         """Update a user's session data."""
         session = await self.get_session(user_id)
         if not session:
-            session = await self.create_session(user_id)
+            session = UserSession(user_id=user_id)
         for key, value in data.items():
             if key in _VALID_SESSION_FIELDS:
                 setattr(session, key, value)
-        await self.save_session(session)
+        await self.save_session(session, expire=expire)
 
     async def has_session(self, user_id: int) -> bool:
         """Check if a user has an active session."""

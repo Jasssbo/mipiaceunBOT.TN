@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-Automated Whitehat, Anti-AI-Slop & Markdown Security Audit Script for mipiaceunBOT.TN.
+Automated Whitehat, Anti-AI-Slop, Memory & Markdown Security Audit Script for mipiaceunBOT.TN.
+Runs 100% hermetically (zero network calls to production Redis, zero disk artifacts).
+
 Verifies:
 1. Markdown Security & Prompt-Injection Sanitization (invisible Unicode, Bidi overrides, HTML comment injections, RCE pipes)
-2. Anti-AI-Slop Detection (cargo-cult `touch *.session`, obsolete `reports.json`, AI meta-comments)
-3. AST Static Analysis (undefined names/imports, bare excepts, blocking calls)
+2. Anti-AI-Slop & Hardcoded Secret Detection (cargo-cult `touch *.session`, obsolete `reports.json`, leaked tokens/URLs)
+3. AST Static Analysis & OWASP Access Control (accurate lexical scoping, bare excepts, blocking calls, handler auth checks)
 4. Dependencies & Native C/C++ Extensions (pyrogram, tgcrypto, sqlalchemy[asyncio], greenlet, aiosqlite, redis)
-5. Async Runtime Smoke Tests (Pyrogram 64-bit patch, 0-byte .session self-healing, SessionManager + fallback, SQLite DB)
+5. Hermetic Async Runtime Smoke Tests (64-bit IDs, 0-byte .session self-healing, HMAC callback signing, bounded memory, SQLite)
 6. Git & Docker Secret Hygiene
 """
 import ast
@@ -17,6 +19,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Set, List, Tuple
 
@@ -25,6 +28,14 @@ SOURCE_DIR = ROOT_DIR / "source"
 sys.path.insert(0, str(SOURCE_DIR))
 
 BUILTIN_NAMES = set(dir(builtins)) | {"__file__", "__name__", "__doc__", "__package__", "__all__"}
+
+# Handlers that are intentionally accessible to all users per GDPR Art. 15 & Art. 17
+GDPR_PUBLIC_HANDLERS = {
+    "privacy_command_handler",
+    "terms_command_handler",
+    "my_data_handler",
+    "erase_my_data_handler",
+}
 
 # Steganographic / invisible / bidirectional Unicode code points used in compromised .md attacks
 DANGEROUS_UNICODE_RANGES = [
@@ -37,14 +48,26 @@ DANGEROUS_UNICODE_RANGES = [
 ]
 
 PROMPT_INJECTION_PATTERNS = [
-    re.compile(r"<!--[\s\S]*?(ignore\s+(all\s+)?previous|disregard\s+all|system\s+prompt|you\s+must\s+now|override\s+instructions|curl\s+|wget\s+|eval\s*\(|base64\s+-d)[\s\S]*?-->", re.IGNORECASE),
+    re.compile(
+        r"<!--[\s\S]*?(ignore\s+(all\s+)?previous|disregard\s+all|system\s+prompt|you\s+must\s+now|override\s+instructions|curl\s+|wget\s+|eval\s*\(|base64\s+-d)[\s\S]*?-->",
+        re.IGNORECASE,
+    ),
     re.compile(r"(curl|wget)\s+[^\n|]+\|\s*(ba)?sh\b", re.IGNORECASE),
     re.compile(r"base64\s+(-d|--decode)\s*\|\s*(ba)?sh\b", re.IGNORECASE),
 ]
 
 AI_SLOP_PATTERNS = [
-    (re.compile(r"\b(as an ai language model|here is the updated code|rest of the code remains unchanged)\b", re.IGNORECASE), "AI meta-commentary"),
+    (
+        re.compile(r"\b(as an ai language model|here is the updated code|rest of the code remains unchanged)\b", re.IGNORECASE),
+        "AI meta-commentary",
+    ),
     (re.compile(r"#\s*TODO:\s*implement\b", re.IGNORECASE), "Unfinished placeholder TODO"),
+]
+
+# Patterns for accidentally hardcoded live credentials in source code
+SECRET_LEAK_PATTERNS = [
+    (re.compile(r"\b[0-9]{8,10}:[A-Za-z0-9_-]{35}\b"), "Hardcoded Telegram BOT_TOKEN"),
+    (re.compile(r"rediss?://[^:\s]+:[^@\s]{10,}@[^\s\"']+"), "Hardcoded Redis URL with password"),
 ]
 
 
@@ -72,7 +95,6 @@ def check_markdown_security(sanitize: bool = False) -> List[str]:
         bad_chars = []
         cleaned_chars = []
         for idx, ch in enumerate(raw_text):
-            # Allow BOM only at index 0
             if idx == 0 and ord(ch) == 0xFEFF:
                 cleaned_chars.append(ch)
                 continue
@@ -102,8 +124,8 @@ def check_markdown_security(sanitize: bool = False) -> List[str]:
     return errors
 
 
-def check_ai_slop() -> List[str]:
-    """Checks Dockerfile, scripts, and Python source for known AI-slop and cargo-cult anti-patterns."""
+def check_ai_slop_and_secrets() -> List[str]:
+    """Checks Dockerfile, scripts, and Python source for AI-slop, cargo-cult anti-patterns, and hardcoded secrets."""
     errors = []
 
     # 1. Dockerfile must never `touch *.session` (causes 0-byte SQLite OperationalError: no such table: version)
@@ -123,29 +145,65 @@ def check_ai_slop() -> List[str]:
         if 'SOURCE_FILE="reports.json"' in b_text:
             errors.append("[AI SLOP] backup.sh still targets obsolete 'reports.json' instead of 'users_data.db'")
 
-    # 3. Python source files check for AI meta-comments
+    # 3. Python source files check for AI meta-comments and hardcoded credentials
     for py_file in sorted(SOURCE_DIR.rglob("*.py")):
         rel = py_file.relative_to(ROOT_DIR)
         text = py_file.read_text(encoding="utf-8")
         for pattern, desc in AI_SLOP_PATTERNS:
             if pattern.search(text):
                 errors.append(f"[AI SLOP] {rel} contains {desc}")
+        for pattern, desc in SECRET_LEAK_PATTERNS:
+            if pattern.search(text):
+                errors.append(f"[SECRET LEAK] {rel} contains {desc}")
 
     return errors
 
 
+def _collect_func_locals(node: ast.AST, out: Set[str]) -> None:
+    """Collects local variable names bound inside a function body without descending into nested scopes."""
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            out.add(child.name)
+            # Do NOT descend into nested function/class bodies
+            continue
+        if isinstance(child, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.Lambda)):
+            # Do NOT leak comprehension/lambda variables into outer function scope
+            continue
+        if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
+            out.add(child.id)
+        elif isinstance(child, ast.Import):
+            for alias in child.names:
+                out.add(alias.asname or alias.name.split(".")[0])
+        elif isinstance(child, ast.ImportFrom):
+            for alias in child.names:
+                if alias.name != "*":
+                    out.add(alias.asname or alias.name)
+        elif isinstance(child, ast.ExceptHandler) and child.name:
+            out.add(child.name)
+        _collect_func_locals(child, out)
+
+
 class UndefinedNameVisitor(ast.NodeVisitor):
-    """Detects potentially undefined variable/function references in Python AST."""
+    """Detects undefined variable/function references in Python AST respecting Python lexical scoping rules."""
 
     def __init__(self):
-        self.scopes: List[Set[str]] = [set(BUILTIN_NAMES)]
+        # Each tuple is (scope_set, is_class_scope). Class scopes are not visible to nested functions!
+        self.scopes: List[Tuple[Set[str], bool]] = [(set(BUILTIN_NAMES), False)]
         self.undefined: List[Tuple[int, str]] = []
 
     def _define(self, name: str):
-        self.scopes[-1].add(name)
+        self.scopes[-1][0].add(name)
 
     def _is_defined(self, name: str) -> bool:
-        return any(name in scope for scope in reversed(self.scopes))
+        for idx in range(len(self.scopes) - 1, -1, -1):
+            scope_set, is_class_scope = self.scopes[idx]
+            # A class body scope is only visible at the top of the stack (inside the class body itself),
+            # never inside methods defined within the class.
+            if is_class_scope and idx != len(self.scopes) - 1:
+                continue
+            if name in scope_set:
+                return True
+        return False
 
     def _define_target(self, target: ast.AST):
         if isinstance(target, ast.Name):
@@ -174,7 +232,7 @@ class UndefinedNameVisitor(ast.NodeVisitor):
             self.visit(dec)
         for base in node.bases:
             self.visit(base)
-        self.scopes.append(set())
+        self.scopes.append((set(), True))
         for stmt in node.body:
             self.visit(stmt)
         self.scopes.pop()
@@ -196,22 +254,9 @@ class UndefinedNameVisitor(ast.NodeVisitor):
         ):
             func_scope.add(arg.arg)
 
-        for child in ast.walk(node):
-            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
-                func_scope.add(child.id)
-            elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                func_scope.add(child.name)
-            elif isinstance(child, ast.Import):
-                for alias in child.names:
-                    func_scope.add(alias.asname or alias.name.split(".")[0])
-            elif isinstance(child, ast.ImportFrom):
-                for alias in child.names:
-                    if alias.name != "*":
-                        func_scope.add(alias.asname or alias.name)
-            elif isinstance(child, ast.ExceptHandler) and child.name:
-                func_scope.add(child.name)
+        _collect_func_locals(node, func_scope)
 
-        self.scopes.append(func_scope)
+        self.scopes.append((func_scope, False))
         for stmt in node.body:
             self.visit(stmt)
         self.scopes.pop()
@@ -233,38 +278,67 @@ class UndefinedNameVisitor(ast.NodeVisitor):
         self._define_target(node.target)
 
     def visit_For(self, node: ast.For):
+        self.visit(node.iter)
         self._define_target(node.target)
-        self.generic_visit(node)
+        for stmt in node.body:
+            self.visit(stmt)
+        for stmt in node.orelse:
+            self.visit(stmt)
 
     def visit_AsyncFor(self, node: ast.AsyncFor):
+        self.visit(node.iter)
         self._define_target(node.target)
-        self.generic_visit(node)
+        for stmt in node.body:
+            self.visit(stmt)
+        for stmt in node.orelse:
+            self.visit(stmt)
 
     def visit_With(self, node: ast.With):
         for item in node.items:
+            self.visit(item.context_expr)
             if item.optional_vars:
                 self._define_target(item.optional_vars)
-        self.generic_visit(node)
+        for stmt in node.body:
+            self.visit(stmt)
 
     def visit_AsyncWith(self, node: ast.AsyncWith):
         for item in node.items:
+            self.visit(item.context_expr)
             if item.optional_vars:
                 self._define_target(item.optional_vars)
-        self.generic_visit(node)
+        for stmt in node.body:
+            self.visit(stmt)
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler):
+        if node.type:
+            self.visit(node.type)
         if node.name:
             self._define(node.name)
-        self.generic_visit(node)
+        for stmt in node.body:
+            self.visit(stmt)
 
     def _visit_comprehension(self, node):
+        # In Python, the first generator's iter is evaluated in the outer scope!
+        first_gen = node.generators[0]
+        self.visit(first_gen.iter)
+
         comp_scope: Set[str] = set()
-        for gen in node.generators:
-            for child in ast.walk(gen.target):
-                if isinstance(child, ast.Name):
-                    comp_scope.add(child.id)
-        self.scopes.append(comp_scope)
-        self.generic_visit(node)
+        self.scopes.append((comp_scope, False))
+        self._define_target(first_gen.target)
+        for if_clause in first_gen.ifs:
+            self.visit(if_clause)
+
+        for gen in node.generators[1:]:
+            self.visit(gen.iter)
+            self._define_target(gen.target)
+            for if_clause in gen.ifs:
+                self.visit(if_clause)
+
+        if isinstance(node, ast.DictComp):
+            self.visit(node.key)
+            self.visit(node.value)
+        else:
+            self.visit(node.elt)
         self.scopes.pop()
 
     def visit_ListComp(self, node: ast.ListComp):
@@ -280,8 +354,15 @@ class UndefinedNameVisitor(ast.NodeVisitor):
         self._visit_comprehension(node)
 
     def visit_Lambda(self, node: ast.Lambda):
-        lam_scope = {a.arg for a in node.args.args}
-        self.scopes.append(lam_scope)
+        for default in node.args.defaults + node.args.kw_defaults:
+            if default:
+                self.visit(default)
+        lam_scope = {a.arg for a in node.args.posonlyargs + node.args.args + node.args.kwonlyargs}
+        if node.args.vararg:
+            lam_scope.add(node.args.vararg.arg)
+        if node.args.kwarg:
+            lam_scope.add(node.args.kwarg.arg)
+        self.scopes.append((lam_scope, False))
         self.visit(node.body)
         self.scopes.pop()
 
@@ -293,6 +374,36 @@ class UndefinedNameVisitor(ast.NodeVisitor):
         if isinstance(node.ctx, ast.Load):
             if not self._is_defined(node.id):
                 self.undefined.append((node.lineno, node.id))
+
+
+def _check_handler_access_control(tree: ast.Module, rel: Path) -> List[str]:
+    """Verifies that every Pyrogram @bot.on_message / @bot.on_callback_query handler enforces access control."""
+    errors = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        is_bot_handler = False
+        has_group_member_decorator = False
+        for dec in node.decorator_list:
+            dec_src = ast.unparse(dec)
+            if "bot.on_message" in dec_src or "bot.on_callback_query" in dec_src:
+                is_bot_handler = True
+            if "require_group_member" in dec_src:
+                has_group_member_decorator = True
+
+        if not is_bot_handler:
+            continue
+        if has_group_member_decorator or node.name in GDPR_PUBLIC_HANDLERS:
+            continue
+
+        body_src = ast.unparse(node)
+        if "ADMIN_IDS" in body_src or "CHAT_ID" in body_src:
+            continue
+
+        errors.append(
+            f"[OWASP A01 ACCESS CONTROL] {rel}:{node.lineno} -> Handler '{node.name}' lacks @require_group_member or ADMIN_IDS/CHAT_ID check"
+        )
+    return errors
 
 
 def check_ast_all_files() -> List[str]:
@@ -327,6 +438,8 @@ def check_ast_all_files() -> List[str]:
                 if isinstance(node.func.value, ast.Name) and node.func.value.id == "time" and node.func.attr == "sleep":
                     errors.append(f"[BLOCKING CALL] {rel}:{node.lineno} -> Blocking 'time.sleep()' in async codebase")
 
+        errors.extend(_check_handler_access_control(tree, rel))
+
     return errors
 
 
@@ -347,9 +460,13 @@ def check_dependencies() -> List[str]:
 
 async def check_runtime_components() -> List[str]:
     errors = []
-    os.environ.setdefault("API_ID", "123456")
-    os.environ.setdefault("API_HASH", "0123456789abcdef0123456789abcdef")
-    os.environ.setdefault("BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
+    # Force hermetic in-memory environment BEFORE importing project modules so load_dotenv()
+    # never connects to production Redis or creates SQLite files on disk during the audit.
+    os.environ["API_ID"] = "123456"
+    os.environ["API_HASH"] = "0123456789abcdef0123456789abcdef"
+    os.environ["BOT_TOKEN"] = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+    os.environ["REDIS_URL"] = "memory://"
+    os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 
     try:
         import config
@@ -394,7 +511,7 @@ async def check_runtime_components() -> List[str]:
     except Exception as e:
         errors.append(f"[MODULE / STORAGE ERROR] Failed runtime verification: {e}")
 
-    # Test SessionManager & UserSession (both announcement and report flows + fallback + memory bounds)
+    # Test SessionManager & UserSession (both announcement and report flows + memory bounds & TTL eviction)
     try:
         from cachetools import TTLCache
         from core.session_manager import SessionManager
@@ -419,14 +536,23 @@ async def check_runtime_components() -> List[str]:
         count = await sm.increment_daily_count(999001)
         if count != 1:
             errors.append(f"[RATE LIMIT] Expected daily count 1, got {count}")
+
+        # Verify expired key eviction in _memory_store
+        SessionManager._memory_store["audit_test:expired"] = ("val", time.time() - 10)
+        SessionManager._ops_counter = 49
+        sm._mem_periodic_sweep()
+        if "audit_test:expired" in SessionManager._memory_store:
+            errors.append("[MEMORY MANAGEMENT] SessionManager._mem_periodic_sweep failed to evict expired key")
+
         await sm.clear_all()
     except Exception as e:
         errors.append(f"[SESSION MANAGER] Runtime test failed: {e}")
 
-    # Test Database Repository on isolated in-memory SQLite
+    # Test Database Repository on isolated in-memory SQLite (zero disk artifacts)
     try:
         from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
         from database.models import Base, Report
+        import database.repository as repo_mod
         from database.repository import ReportRepository
 
         test_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -449,6 +575,7 @@ async def check_runtime_components() -> List[str]:
             if erased != 1:
                 errors.append(f"[DATABASE] GDPR erase expected 1 deleted row, got {erased}")
         await test_engine.dispose()
+        await repo_mod.engine.dispose()
     except Exception as e:
         errors.append(f"[DATABASE] Async SQLAlchemy smoke test failed: {e}")
 
@@ -497,12 +624,12 @@ def main():
     all_errors.extend(md_errs)
     print("   ✅ Passed!" if not md_errs else f"   ❌ Found {len(md_errs)} issue(s)")
 
-    print("2️⃣  Scanning Codebase & Docker Configs for AI Slop / Anti-Patterns ...")
-    slop_errs = check_ai_slop()
+    print("2️⃣  Scanning Codebase & Docker Configs for AI Slop / Leaked Secrets ...")
+    slop_errs = check_ai_slop_and_secrets()
     all_errors.extend(slop_errs)
     print("   ✅ Passed!" if not slop_errs else f"   ❌ Found {len(slop_errs)} issue(s)")
 
-    print("3️⃣  Running AST Static Analysis on source/ ...")
+    print("3️⃣  Running AST Static & OWASP Access Control Analysis on source/ ...")
     ast_errs = check_ast_all_files()
     all_errors.extend(ast_errs)
     print("   ✅ Passed!" if not ast_errs else f"   ❌ Found {len(ast_errs)} issue(s)")
@@ -512,7 +639,7 @@ def main():
     all_errors.extend(dep_errs)
     print("   ✅ Passed!" if not dep_errs else f"   ❌ Found {len(dep_errs)} issue(s)")
 
-    print("5️⃣  Running Async Runtime Smoke Tests (64-bit IDs, 0-byte Session, Redis, SQLite) ...")
+    print("5️⃣  Running Hermetic Async Runtime Smoke Tests (64-bit IDs, HMAC, Memory, DB) ...")
     rt_errs = asyncio.run(check_runtime_components())
     all_errors.extend(rt_errs)
     print("   ✅ Passed!" if not rt_errs else f"   ❌ Found {len(rt_errs)} issue(s)")
