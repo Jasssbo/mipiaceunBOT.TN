@@ -105,9 +105,9 @@ CATEGORY_NAMES = {
 }
 
 # Tempo entro cui l'utente deve finire l'annuncio altrimenti viene eliminato per alleggerire lo user_data
-announce_timeout = 1200 # in secondi (20 minuti)
+announce_timeout = 600  # in secondi (10 minuti)
 
-report_timeout = 300 # in secondi (5 minuti)
+report_timeout = 600  # in secondi (10 minuti)
 
 # --- RATE LIMITING ---
 # Massimo numero di annunci per utente al giorno

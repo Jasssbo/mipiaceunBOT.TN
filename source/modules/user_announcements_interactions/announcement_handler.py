@@ -31,12 +31,31 @@ msg_service = get_message_service()
 
 # Per-user lock per prevenire race condition nell'invio di album (media_group)
 _user_locks: Dict[int, asyncio.Lock] = {}
+# Task di timeout attivi per utente (evita che vecchi timer scadano su nuove sessioni)
+_timeout_tasks: Dict[int, asyncio.Task] = {}
 
 
 def _get_user_lock(user_id: int) -> asyncio.Lock:
     if user_id not in _user_locks:
         _user_locks[user_id] = asyncio.Lock()
     return _user_locks[user_id]
+
+
+def cancel_compilation_timeout(user_id: int) -> None:
+    """Annulla il timer di timeout attivo per l'utente, se presente."""
+    task = _timeout_tasks.pop(user_id, None)
+    if task and not task.done():
+        task.cancel()
+
+
+async def reschedule_compilation_timeout(client, user_id: int, timeout: int = announce_timeout) -> None:
+    """Avvia o riavvia il timer di inattività (10 minuti) per la compilazione dell'annuncio."""
+    cancel_compilation_timeout(user_id)
+    # Imposta il TTL su Redis con un margine di +30s così il task invia l'avviso e pulisce i messaggi prima dell'eviction
+    await sessions.schedule_cleanup(user_id, timeout + 30)
+    _timeout_tasks[user_id] = asyncio.create_task(
+        start_compilation_timeout(client, user_id, timeout)
+    )
 
 # ------------------------ FUNZIONI DI SUPPORTO ------------------------
 def build_announcement_text(info: Dict, user, show_id: Optional[int] = None) -> str:
@@ -180,9 +199,12 @@ async def publish_announcement(client, user_id: int, info: Dict) -> Optional[Dic
 # ------------------------ GESTIONE DATI UTENTE ------------------------
 async def cleanup_user_data_and_messages(client, user_id: int, reason: str = "", cleanup_type: str = ""):
     """Pulisce i dati utente e i messaggi associati."""
+    cancel_compilation_timeout(user_id)
     if not await sessions.has_session(user_id):
         return
     info = await sessions.get_session(user_id)
+    if not info:
+        return
 
     try:
         user = await client.get_users(user_id)
@@ -192,11 +214,11 @@ async def cleanup_user_data_and_messages(client, user_id: int, reason: str = "",
             category_name = CATEGORY_NAMES.get(category, category.capitalize() if category else "")
             
             if cleanup_type == "timeout":
-                logging.info(f"{YELLOW}[TIMEOUT ANNUNCIO] @{username} non ha completato la pubblicazione di un {category_name} entro il tempo limite{RESET}")
+                logging.info(f"{YELLOW}[TIMEOUT ANNUNCIO] @{username} non ha completato la pubblicazione di '{category_name}' entro i 10 minuti{RESET}")
             elif cleanup_type == "cancel":
-                logging.info(f"{YELLOW}[ANNUNCIO ANNULLATO] @{username} ha annullato la pubblicazione di un {category_name}{RESET}")
+                logging.info(f"{YELLOW}[ANNUNCIO ANNULLATO] @{username} ha annullato la pubblicazione di '{category_name}'{RESET}")
             else:
-                logging.info(f"{YELLOW}[PUBBLICAZIONE INTERROTTA] @{username} ha interrotto la pubblicazione di un {category_name}{RESET}")
+                logging.info(f"{YELLOW}[PUBBLICAZIONE INTERROTTA] @{username} ha interrotto la pubblicazione di '{category_name}'{RESET}")
     except Exception as e:
         logging.error(f"{RED}Errore nel logging della cancellazione annuncio: {str(e)}{RESET}")
 
@@ -231,9 +253,13 @@ async def cleanup_user_data_and_messages(client, user_id: int, reason: str = "",
     # Delete session using SessionManager
     await sessions.delete_session(user_id)
     
-    msg = "⏱️ Tempo scaduto, i dati inseriti sono stati eliminati. Sei tornato al Menù."
+    # Se è un annullamento esplicito, il messaggio del menu viene già inviato da buttons.py
+    if cleanup_type == "cancel":
+        return
+
+    msg = "⏱️ Tempo scaduto (10 minuti di inattività), i dati inseriti sono stati eliminati. Sei tornato al Menù."
     if reason:
-        msg = f"{reason}\n\n{msg}"
+        msg = f"{reason}\n\nSei tornato al Menù."
     
     # Send main menu using ui_components
     keyboard = build_main_menu_keyboard()
@@ -241,9 +267,15 @@ async def cleanup_user_data_and_messages(client, user_id: int, reason: str = "",
 
 async def start_compilation_timeout(client, user_id: int, timeout: int):
     """Avvia il timer per il timeout della compilazione."""
-    await asyncio.sleep(timeout)
-    if await sessions.has_session(user_id):
-        await cleanup_user_data_and_messages(client, user_id, cleanup_type="timeout")
+    try:
+        await asyncio.sleep(timeout)
+        if await sessions.has_session(user_id):
+            info = await sessions.get_session(user_id)
+            # Verifica che ci sia effettivamente una compilazione attiva (category != None)
+            if info and info.get("category"):
+                await cleanup_user_data_and_messages(client, user_id, cleanup_type="timeout")
+    except asyncio.CancelledError:
+        pass
 
 # ------------------------ HANDLER PRINCIPALE ------------------------
 @bot.on_message(filters.private & ~filters.command(["start", "privacy", "informativa", "informativa_privacy", "terms", "termini", "tos", "my_data", "miei_dati", "erase_my_data", "erase", "gdpr_erase", "admin_reports", "admin_segnalazioni", "admin_ban", "admin_unban", "admin_clear_reports"]))
@@ -253,6 +285,7 @@ async def collect_data_handler(client, message: Message):
     if not user:
         return
     user_id = user.id
+    username = user.username if user.username else f"user{user_id}"
 
     async with _get_user_lock(user_id):
         # Gestisci solo utenti con sessione attiva e categoria impostata
@@ -262,6 +295,9 @@ async def collect_data_handler(client, message: Message):
         info = await sessions.get_session(user_id)
         if not info or not info.get("category"):
             return
+
+        # Rinnova il timeout di 10 minuti ad ogni interazione dell'utente
+        await reschedule_compilation_timeout(client, user_id, announce_timeout)
 
         # Gestione messaggi di errore precedenti
         err_msg_id = await sessions.get_error_message(user_id)
@@ -280,11 +316,8 @@ async def collect_data_handler(client, message: Message):
         try:
             cat = info["category"]
             step = info["step"]
-
-            # Log quando l'utente inizia una nuova pubblicazione
-            if step == 0:
-                category_name = CATEGORY_NAMES.get(cat, cat.capitalize() if cat else "")
-                logging.info(f"[NUOVO ANNUNCIO] user_id={user.id} ha iniziato la pubblicazione di un {category_name}")
+            total_steps = len(CATEGORY_QUESTIONS[cat])
+            category_name = CATEGORY_NAMES.get(cat, cat.capitalize() if cat else "")
 
             question_data = CATEGORY_QUESTIONS[cat][step]
             question_text = question_data["question"]
@@ -314,11 +347,16 @@ async def collect_data_handler(client, message: Message):
                             logging.error(f"{RED}Errore eliminazione conferma file: {str(e)}{RESET}")
                     info["multi_file_temp_msgs"] = []
                     
-                    if info["files"][label_text]:
-                        info["answers"][label_text] = f"{len(info['files'][label_text])} file allegati."
+                    num_files = len(info["files"][label_text])
+                    if num_files > 0:
+                        info["answers"][label_text] = f"{num_files} file allegati."
                     else:
                         info["answers"][label_text] = "Nessun file allegato."
                     
+                    logging.info(
+                        f"{GREEN}[COMPILAZIONE {category_name}] @{username} (step {step + 1}/{total_steps}) "
+                        f"ha completato '{label_text}' -> {info['answers'][label_text]}{RESET}"
+                    )
                     await sessions.save_session(info)
                     await proceed_to_next_step(client, user.id, info, cat)
                     return
@@ -327,16 +365,28 @@ async def collect_data_handler(client, message: Message):
                 if getattr(message, "media_group_id", None) and message.photo:
                     for photo in message.photo if isinstance(message.photo, list) else [message.photo]:
                         await add_file_and_confirm(client, user.id, info, label_text, photo.file_id, "photo")
+                    logging.info(
+                        f"{BLUE}[COMPILAZIONE {category_name}] @{username} (step {step + 1}/{total_steps}) "
+                        f"ha caricato foto per '{label_text}' (totale: {len(info['files'][label_text])}){RESET}"
+                    )
                     await sessions.save_session(info)
                     return
 
                 if message.photo and not getattr(message, "media_group_id", None):
                     await add_file_and_confirm(client, user.id, info, label_text, message.photo.file_id, "photo")
+                    logging.info(
+                        f"{BLUE}[COMPILAZIONE {category_name}] @{username} (step {step + 1}/{total_steps}) "
+                        f"ha caricato una foto per '{label_text}' (totale: {len(info['files'][label_text])}){RESET}"
+                    )
                     await sessions.save_session(info)
                     return
                 
                 if message.document:
                     await add_file_and_confirm(client, user.id, info, label_text, message.document.file_id, "document")
+                    logging.info(
+                        f"{BLUE}[COMPILAZIONE {category_name}] @{username} (step {step + 1}/{total_steps}) "
+                        f"ha caricato un documento per '{label_text}' (totale: {len(info['files'][label_text])}){RESET}"
+                    )
                     await sessions.save_session(info)
                     return
 
@@ -363,11 +413,27 @@ async def collect_data_handler(client, message: Message):
                 info["answers"][label_text] = "📎 File allegato."
                 info["file"] = message.photo.file_id if message.photo else message.document.file_id
                 info["file_type"] = "photo" if message.photo else "document"
+                logging.info(
+                    f"{GREEN}[COMPILAZIONE {category_name}] @{username} (step {step + 1}/{total_steps}) "
+                    f"ha allegato {info['file_type']} per '{label_text}'{RESET}"
+                )
             elif message.text:
                 if "(opzionale)" in question_text.lower() and message.text.lower().strip() == "/skip":
                     info["answers"][label_text] = "Saltato."
+                    logging.info(
+                        f"{YELLOW}[COMPILAZIONE {category_name}] @{username} (step {step + 1}/{total_steps}) "
+                        f"ha saltato '{label_text}'{RESET}"
+                    )
                 else:
-                    info["answers"][label_text] = message.text.strip()
+                    clean_text = message.text.strip()
+                    info["answers"][label_text] = clean_text
+                    preview_val = clean_text.replace("\n", " ")
+                    if len(preview_val) > 80:
+                        preview_val = preview_val[:77] + "..."
+                    logging.info(
+                        f"{GREEN}[COMPILAZIONE {category_name}] @{username} (step {step + 1}/{total_steps}) "
+                        f"ha inserito '{label_text}' -> \"{preview_val}\"{RESET}"
+                    )
 
             await sessions.save_session(info)
             await proceed_to_next_step(client, user.id, info, cat)
@@ -387,25 +453,19 @@ async def proceed_to_next_step(client, user_id: int, info: Dict, cat: str):
         except Exception as e:
             logging.error(f"{RED}Errore nell'eliminazione della domanda del bot: {str(e)}{RESET}")
     
-    # Elimina tutti i messaggi dell'utente (inclusi file/foto) uno per uno
-    session = await sessions.get_session(user_id)
-    messages_to_clear = session.get("user_messages_to_delete", []) if session else []
+    # Elimina i messaggi dell'utente inviati in questo step e svuota la lista in `info`
+    messages_to_clear = list(info.get("user_messages_to_delete", []))
     if messages_to_clear:
-        logging.debug(f"Tentativo di eliminare {len(messages_to_clear)} messaggi utente")
         deleted_count = 0
         for mid in messages_to_clear:
             try:
                 await msg_service.delete_message(client, user_id, mid)
                 deleted_count += 1
-                logging.debug(f"✓ Eliminato messaggio utente ID: {mid}")
             except Exception as e:
-                logging.error(f"{RED}✗ Errore eliminazione messaggio {mid}: {str(e)}{RESET}")
-        
-        if deleted_count > 0:
-            logging.info(f"{GREEN}Eliminati {deleted_count}/{len(messages_to_clear)} messaggi utente{RESET}")
+                logging.debug(f"Impossibile eliminare messaggio {mid}: {str(e)}")
+        logging.debug(f"Pulizia chat privata: eliminati {deleted_count}/{len(messages_to_clear)} messaggi utente")
     
-    if session:
-        session["user_messages_to_delete"] = []
+    info["user_messages_to_delete"] = []
     info["step"] += 1
     await sessions.save_session(info)
 
@@ -428,6 +488,8 @@ async def proceed_to_next_step(client, user_id: int, info: Dict, cat: str):
         # send_clean_message aggiorna info['messages_to_delete'] automaticamente
     else:
         # Tutte le domande completate - mostra preview e chiedi conferma
+        category_name = CATEGORY_NAMES.get(cat, cat.capitalize() if cat else "")
+        logging.info(f"{BLUE}[ANTEPRIMA {category_name}] user_id={user_id} ha completato tutte le domande, invio anteprima di conferma{RESET}")
         preview_id = await send_preview(client, user_id, info)
         session = await sessions.get_session(user_id)
         if session:
