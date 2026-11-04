@@ -6,9 +6,12 @@ import asyncio
 from pyrogram import filters
 from pyrogram.errors import FloodWait
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from config import CATEGORY_QUESTIONS, bot, CHAT_ID, YELLOW, GREEN, RED, BLUE, RESET, POINTER_MESSAGE_IDS, announce_timeout
+from config import (
+    CATEGORY_QUESTIONS, bot, CHAT_ID, YELLOW, GREEN, RED, BLUE, RESET,
+    POINTER_MESSAGE_IDS, announce_timeout, MAX_ANNOUNCEMENTS_PER_DAY
+)
 from modules.user_announcements_interactions.utils.message_utils import send_clean_message, safe_delete
-from modules.permissions.topic_permissions import is_user_allowed_by_username
+from modules.permissions.user_permissions import is_user_allowed_by_username
 from core.session_manager import get_announcement_sessions, get_report_sessions
 from services.message_service import get_message_service
 from core.ui_components import build_main_menu_keyboard, build_back_to_menu_keyboard, build_cancel_report_keyboard
@@ -244,6 +247,19 @@ async def _handle_callback(client, callback_query: CallbackQuery):
             return
         if data.startswith("new_"):
             cat = data.replace("new_", "")
+            if cat not in CATEGORY_QUESTIONS:
+                await callback_query.answer("❌ Categoria non valida.", show_alert=True)
+                return
+
+            # Rate limiting giornaliero annunci
+            daily_count = await announcement_sessions.get_daily_count(user_id)
+            if daily_count >= MAX_ANNOUNCEMENTS_PER_DAY:
+                await callback_query.answer(
+                    f"⚠️ Hai raggiunto il limite massimo di {MAX_ANNOUNCEMENTS_PER_DAY} annunci al giorno. Riprova domani!",
+                    show_alert=True,
+                )
+                return
+
             # Elimina il messaggio del menu principale (se esiste)
             try:
                 await client.delete_messages(user_id, callback_query.message.id)
@@ -281,6 +297,9 @@ async def _handle_callback(client, callback_query: CallbackQuery):
         # --- Conferma pubblicazione annuncio ---
         elif data.startswith("confirm_"):
             uid = int(data.split("_")[1])
+            if callback_query.from_user.id != uid:
+                await callback_query.answer("❌ Azione non autorizzata.", show_alert=True)
+                return
             user = await client.get_users(uid)
             info = await announcement_sessions.get_session(uid)
             if not info:
@@ -293,8 +312,20 @@ async def _handle_callback(client, callback_query: CallbackQuery):
                 await callback_query.answer("Errore durante la pubblicazione", show_alert=True)
                 return
             
+            await announcement_sessions.increment_daily_count(uid)
             msg_id = result['message_id']
             ann_media_ids = result['media_ids']
+
+            # Elimina la vecchia preview senza ID prima di inviare quella nuova con ID
+            old_noid_ids = info.get("preview_noid_msg_ids") or []
+            old_preview_id = info.get("preview_msg_id")
+            ids_to_clean = list(old_noid_ids)
+            if isinstance(old_preview_id, list):
+                ids_to_clean.extend(old_preview_id)
+            elif isinstance(old_preview_id, int):
+                ids_to_clean.append(old_preview_id)
+            for mid in set(ids_to_clean):
+                await msg_service.delete_message(client, uid, mid)
             
             # Invia una nuova preview privata con ID e bottoni, salva tutti gli id
             from modules.user_announcements_interactions.announcement_handler import build_announcement_text
@@ -351,13 +382,21 @@ async def _handle_callback(client, callback_query: CallbackQuery):
         # --- Annullamento pubblicazione annuncio ---
         elif data.startswith("cancel_"):
             uid = int(data.split("_")[1])
-            user = await client.get_users(uid)
+            if callback_query.from_user.id != uid:
+                await callback_query.answer("❌ Azione non autorizzata.", show_alert=True)
+                return
             info = await announcement_sessions.get_session(uid)
             if info:
                 preview_id = info.get("preview_msg_id")
+                preview_noid_ids = info.get("preview_noid_msg_ids") or []
                 confirm_id = info.get("confirm_msg_id")
-                if preview_id:
-                    await msg_service.delete_message(client, uid, preview_id)
+                ids_to_del = list(preview_noid_ids)
+                if isinstance(preview_id, list):
+                    ids_to_del.extend(preview_id)
+                elif isinstance(preview_id, int):
+                    ids_to_del.append(preview_id)
+                for mid in set(ids_to_del):
+                    await msg_service.delete_message(client, uid, mid)
                 if confirm_id:
                     await msg_service.delete_message(client, uid, confirm_id)
             

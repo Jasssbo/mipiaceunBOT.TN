@@ -19,8 +19,10 @@ from pyrogram import filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from core.session_manager import get_report_sessions
 from core.ui_components import build_back_to_menu_keyboard, build_cancel_report_keyboard
-from database.repository import get_repository, async_session, ReportRepository
+from database.repository import async_session, ReportRepository
 from database.models import Report
+from modules.permissions.user_permissions import invalidate_members_cache
+from middleware.permissions import membership_cache
 
 # Get report session manager
 report_sessions = get_report_sessions()
@@ -36,6 +38,8 @@ async def ban_user_if_needed(client, reported_user_id: int, reported_username: s
     if unique_count >= AUTO_BAN_THRESHOLD:
         try:
             await client.ban_chat_member(CHAT_ID, reported_user_id)
+            invalidate_members_cache()
+            membership_cache.pop(reported_user_id, None)
             logging.info(f"[AUTO-BAN] Utente user_id={reported_user_id} bannato dopo {unique_count} segnalazioni uniche")
 
             # Notifica gli admin
@@ -262,6 +266,8 @@ async def admin_ban_handler(client, message: Message):
     try:
         target_id = int(parts[1])
         await client.ban_chat_member(CHAT_ID, target_id)
+        invalidate_members_cache()
+        membership_cache.pop(target_id, None)
         logging.info(f"[ADMIN] Ban manuale di user_id={target_id} da admin user_id={message.from_user.id}")
         await message.reply(f"✅ Utente {target_id} bannato dal gruppo.")
     except ValueError:
@@ -286,6 +292,8 @@ async def admin_unban_handler(client, message: Message):
     try:
         target_id = int(parts[1])
         await client.unban_chat_member(CHAT_ID, target_id)
+        invalidate_members_cache()
+        membership_cache.pop(target_id, None)
         logging.info(f"[ADMIN] Unban di user_id={target_id} da admin user_id={message.from_user.id}")
         await message.reply(f"✅ Utente {target_id} sbannato. Può rientrare nel gruppo.")
     except ValueError:
@@ -327,10 +335,12 @@ async def admin_clear_reports_handler(client, message: Message):
 
 # ======================== REPORT FLOW HANDLER ========================
 
-@bot.on_message(filters.private, group=1)
+@bot.on_message(filters.private & ~filters.command(["start", "privacy", "informativa", "informativa_privacy", "terms", "termini", "tos", "my_data", "miei_dati", "erase_my_data", "erase", "gdpr_erase", "admin_reports", "admin_segnalazioni", "admin_ban", "admin_unban", "admin_clear_reports"]), group=1)
 async def report_user_handler(client, message: Message):
     """Handler principale per gestire il flusso di segnalazione utente"""
     user = message.from_user
+    if not user:
+        return
     user_id = user.id
     if not await report_sessions.has_session(user_id):
         return
@@ -454,8 +464,7 @@ async def report_user_handler(client, message: Message):
             await report_sessions.delete_session(user_id)
             return
 
-        # Crea nuovo stato con nuovo task di timeout
-        timeout_task = await create_timeout_task(client, user_id, report_timeout)
+        # Aggiorna stato e imposta timeout su Redis/fallback
         await report_sessions.update_session(user_id, {
             "step": "awaiting_reason",
             "reported_username": reported_username,

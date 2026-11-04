@@ -49,6 +49,7 @@ def start_healthcheck_server():
 
 
 # Importa gli handler per attivarli
+from database.repository import init_db
 from modules.core.start import start_handler
 from modules.permissions.user_permissions import is_user_allowed_by_username
 from modules.user_announcements_interactions import announcement_handler
@@ -61,6 +62,7 @@ from modules.reports.report_user import report_user_handler
 # --- Avvio e arresto del bot Telegram ---
 if __name__ == "__main__":
     start_healthcheck_server()
+    bot.loop.run_until_complete(init_db())
     logging.info("🤖 Avvio bot...")
     bot.run()
     logging.info("🔚 Arresto bot...")

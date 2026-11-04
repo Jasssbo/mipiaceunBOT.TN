@@ -16,10 +16,11 @@ from config import (
     CATEGORY_QUESTIONS, bot,
     CATEGORY_NAMES, announce_timeout,
     CHAT_ID, POINTER_MESSAGE_IDS,
-    MAX_INPUT_LENGTH, MAX_ANNOUNCEMENTS_PER_DAY
+    MAX_INPUT_LENGTH, MAX_ANNOUNCEMENTS_PER_DAY,
+    RED, GREEN, YELLOW, BLUE, RESET
 )
 from .utils.message_utils import safe_delete, send_clean_message
-from modules.permissions.topic_permissions import is_user_allowed_by_username
+from modules.permissions.user_permissions import is_user_allowed_by_username
 from core.session_manager import get_announcement_sessions
 from services.message_service import get_message_service
 from core.ui_components import build_main_menu_keyboard
@@ -27,6 +28,15 @@ from core.ui_components import build_main_menu_keyboard
 # Get service instances
 sessions = get_announcement_sessions()
 msg_service = get_message_service()
+
+# Per-user lock per prevenire race condition nell'invio di album (media_group)
+_user_locks: Dict[int, asyncio.Lock] = {}
+
+
+def _get_user_lock(user_id: int) -> asyncio.Lock:
+    if user_id not in _user_locks:
+        _user_locks[user_id] = asyncio.Lock()
+    return _user_locks[user_id]
 
 # ------------------------ FUNZIONI DI SUPPORTO ------------------------
 def build_announcement_text(info: Dict, user, show_id: Optional[int] = None) -> str:
@@ -236,132 +246,135 @@ async def start_compilation_timeout(client, user_id: int, timeout: int):
         await cleanup_user_data_and_messages(client, user_id, cleanup_type="timeout")
 
 # ------------------------ HANDLER PRINCIPALE ------------------------
-@bot.on_message(filters.private & ~filters.command("start"))
+@bot.on_message(filters.private & ~filters.command(["start", "privacy", "informativa", "informativa_privacy", "terms", "termini", "tos", "my_data", "miei_dati", "erase_my_data", "erase", "gdpr_erase", "admin_reports", "admin_segnalazioni", "admin_ban", "admin_unban", "admin_clear_reports"]))
 async def collect_data_handler(client, message: Message):
     """Handler principale per la raccolta dati utente."""
     user = message.from_user
+    if not user:
+        return
     user_id = user.id
-    
-    # Gestisci solo utenti con sessione attiva e categoria impostata
-    if not await sessions.has_session(user_id):
-        return
-    
-    info = await sessions.get_session(user_id)
-    if not info or not info.get("category"):
-        return
 
-    # Gestione messaggi di errore precedenti
-    err_msg_id = await sessions.get_error_message(user_id)
-    if err_msg_id:
+    async with _get_user_lock(user_id):
+        # Gestisci solo utenti con sessione attiva e categoria impostata
+        if not await sessions.has_session(user_id):
+            return
+        
+        info = await sessions.get_session(user_id)
+        if not info or not info.get("category"):
+            return
+
+        # Gestione messaggi di errore precedenti
+        err_msg_id = await sessions.get_error_message(user_id)
+        if err_msg_id:
+            try:
+                await msg_service.delete_message(client, user_id, err_msg_id)
+                await sessions.clear_error_message(user_id)
+            except Exception as e:
+                logging.error(f"{RED}Errore nell'eliminazione del messaggio di errore: {str(e)}{RESET}")
+
+        if "user_messages_to_delete" not in info:
+            info["user_messages_to_delete"] = []
+        info["user_messages_to_delete"].append(message.id)
+        await sessions.save_session(info)
+
         try:
-            await msg_service.delete_message(client, user_id, err_msg_id)
-            await sessions.clear_error_message(user_id)
-        except Exception as e:
-            logging.error(f"{RED}Errore nell'eliminazione del messaggio di errore: {str(e)}{RESET}")
+            cat = info["category"]
+            step = info["step"]
 
-    if "user_messages_to_delete" not in info:
-        info["user_messages_to_delete"] = []
-    info["user_messages_to_delete"].append(message.id)
-    await sessions.save_session(info)
+            # Log quando l'utente inizia una nuova pubblicazione
+            if step == 0:
+                category_name = CATEGORY_NAMES.get(cat, cat.capitalize() if cat else "")
+                logging.info(f"[NUOVO ANNUNCIO] user_id={user.id} ha iniziato la pubblicazione di un {category_name}")
 
-    try:
-        cat = info["category"]
-        step = info["step"]
+            question_data = CATEGORY_QUESTIONS[cat][step]
+            question_text = question_data["question"]
+            label_text = question_data["label"]
+            multi_file = question_data.get("multi_file", False)
+            allowed_types = question_data.get("allowed_types", ["text"])
 
-        # Log quando l'utente inizia una nuova pubblicazione
-        if step == 0:
-            category_name = CATEGORY_NAMES.get(cat, cat.capitalize() if cat else "")
-            logging.info(f"[NUOVO ANNUNCIO] user_id={user.id} ha iniziato la pubblicazione di un {category_name}")
+            # Inizializzazione files e multi_file_temp_msgs
+            if multi_file:
+                if "files" not in info:
+                    info["files"] = {}
+                if label_text not in info["files"]:
+                    info["files"][label_text] = []
+                if "multi_file_temp_msgs" not in info:
+                    info["multi_file_temp_msgs"] = []
+                await sessions.save_session(info)
 
-        question_data = CATEGORY_QUESTIONS[cat][step]
-        question_text = question_data["question"]
-        label_text = question_data["label"]
-        multi_file = question_data.get("multi_file", False)
-        allowed_types = question_data.get("allowed_types", ["text"])
+            # Gestione domande multi-file
+            if multi_file:
+                if message.text and message.text.lower().strip() == "/done":
+                    # Elimina i messaggi di conferma temporanei
+                    for mid in info.get("multi_file_temp_msgs", []):
+                        try:
+                            await client.delete_messages(user.id, mid)
+                            logging.debug(f"Eliminato messaggio conferma file ID: {mid}")
+                        except Exception as e:
+                            logging.error(f"{RED}Errore eliminazione conferma file: {str(e)}{RESET}")
+                    info["multi_file_temp_msgs"] = []
+                    
+                    if info["files"][label_text]:
+                        info["answers"][label_text] = f"{len(info['files'][label_text])} file allegati."
+                    else:
+                        info["answers"][label_text] = "Nessun file allegato."
+                    
+                    await sessions.save_session(info)
+                    await proceed_to_next_step(client, user.id, info, cat)
+                    return
 
-        # Inizializzazione files e multi_file_temp_msgs
-        if multi_file:
-            if "files" not in info:
-                info["files"] = {}
-            if label_text not in info["files"]:
-                info["files"][label_text] = []
-            if "multi_file_temp_msgs" not in info:
-                info["multi_file_temp_msgs"] = []
-            await sessions.save_session(info)
+                # Gestione media group
+                if getattr(message, "media_group_id", None) and message.photo:
+                    for photo in message.photo if isinstance(message.photo, list) else [message.photo]:
+                        await add_file_and_confirm(client, user.id, info, label_text, photo.file_id, "photo")
+                    await sessions.save_session(info)
+                    return
 
-        # Gestione domande multi-file
-        if multi_file:
-            if message.text and message.text.lower().strip() == "/done":
-                # Elimina i messaggi di conferma temporanei
-                for mid in info.get("multi_file_temp_msgs", []):
-                    try:
-                        await client.delete_messages(user.id, mid)
-                        logging.debug(f"Eliminato messaggio conferma file ID: {mid}")
-                    except Exception as e:
-                        logging.error(f"{RED}Errore eliminazione conferma file: {str(e)}{RESET}")
-                info["multi_file_temp_msgs"] = []
+                if message.photo and not getattr(message, "media_group_id", None):
+                    await add_file_and_confirm(client, user.id, info, label_text, message.photo.file_id, "photo")
+                    await sessions.save_session(info)
+                    return
                 
-                if info["files"][label_text]:
-                    info["answers"][label_text] = f"{len(info['files'][label_text])} file allegati."
-                else:
-                    info["answers"][label_text] = "Nessun file allegato."
-                
-                await sessions.save_session(info)
-                await proceed_to_next_step(client, user.id, info, cat)
-                return
+                if message.document:
+                    await add_file_and_confirm(client, user.id, info, label_text, message.document.file_id, "document")
+                    await sessions.save_session(info)
+                    return
 
-            # Gestione media group
-            if getattr(message, "media_group_id", None) and message.photo:
-                for photo in message.photo if isinstance(message.photo, list) else [message.photo]:
-                    await add_file_and_confirm(client, user.id, info, label_text, photo.file_id, "photo")
-                await sessions.save_session(info)
-                return
+                if message.text:
+                    error_msg = await client.send_message(user.id, "❗ Invia una foto o un documento, oppure premi /done per continuare.")
+                    await sessions.set_error_message(user_id, error_msg.id)
+                    return
 
-            if message.photo and not getattr(message, "media_group_id", None):
-                await add_file_and_confirm(client, user.id, info, label_text, message.photo.file_id, "photo")
-                await sessions.save_session(info)
-                return
-            
-            if message.document:
-                await add_file_and_confirm(client, user.id, info, label_text, message.document.file_id, "document")
-                await sessions.save_session(info)
-                return
-
-            if message.text:
-                error_msg = await client.send_message(user.id, "❗ Invia una foto o un documento, oppure premi /done per continuare.")
+                error_msg = await client.send_message(user.id, f"❗ Risposta non valida per questa domanda. Sono ammessi solo: {', '.join(allowed_types)} oppure /done.")
                 await sessions.set_error_message(user_id, error_msg.id)
                 return
 
-            error_msg = await client.send_message(user.id, f"❗ Risposta non valida per questa domanda. Sono ammessi solo: {', '.join(allowed_types)} oppure /done.")
-            await sessions.set_error_message(user_id, error_msg.id)
-            return
+            from services.validation_service import create_validator_from_question
+            validator = create_validator_from_question(question_data)
+            is_valid, error = await validator.validate(message)
+            
+            if not is_valid:
+                error_msg = await client.send_message(user.id, error)
+                await sessions.set_error_message(user_id, error_msg.id)
+                return
 
-        from services.validation_service import create_validator_from_question
-        validator = create_validator_from_question(question_data)
-        is_valid, error = await validator.validate(message)
-        
-        if not is_valid:
-            error_msg = await client.send_message(user.id, error)
-            await sessions.set_error_message(user_id, error_msg.id)
-            return
+            # Gestione domande normali
+            if message.photo or message.document:
+                info["answers"][label_text] = "📎 File allegato."
+                info["file"] = message.photo.file_id if message.photo else message.document.file_id
+                info["file_type"] = "photo" if message.photo else "document"
+            elif message.text:
+                if "(opzionale)" in question_text.lower() and message.text.lower().strip() == "/skip":
+                    info["answers"][label_text] = "Saltato."
+                else:
+                    info["answers"][label_text] = message.text.strip()
 
-        # Gestione domande normali
-        if message.photo or message.document:
-            info["answers"][label_text] = "📎 File allegato."
-            info["file"] = message.photo.file_id if message.photo else message.document.file_id
-            info["file_type"] = "photo" if message.photo else "document"
-        elif message.text:
-            if "(opzionale)" in question_text.lower() and message.text.lower().strip() == "/skip":
-                info["answers"][label_text] = "Saltato."
-            else:
-                info["answers"][label_text] = message.text.strip()
+            await sessions.save_session(info)
+            await proceed_to_next_step(client, user.id, info, cat)
 
-        await sessions.save_session(info)
-        await proceed_to_next_step(client, user.id, info, cat)
-
-    except Exception as e:
-        logging.exception(f"Errore nella raccolta dei dati durante la compilazione dell'annuncio.")
-        await cleanup_user_data_and_messages(client, user.id, reason="❗ Si è verificato un errore durante la compilazione dell'annuncio.")
+        except Exception as e:
+            logging.exception(f"Errore nella raccolta dei dati durante la compilazione dell'annuncio.")
+            await cleanup_user_data_and_messages(client, user.id, reason="❗ Si è verificato un errore durante la compilazione dell'annuncio.")
 
 async def proceed_to_next_step(client, user_id: int, info: Dict, cat: str):
     """Procede al prossimo step della raccolta dati."""

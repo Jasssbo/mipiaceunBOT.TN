@@ -2,8 +2,16 @@
 *.env
 reports.json
 reports.json.lock
+users_data.db
 
-# Esclude la cartella di Pyrogram se esiste
+# Esclude database SQLite e backup locali
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+backups/
+
+# Esclude la sessione di Pyrogram
 *.session
 *.session-journal
 

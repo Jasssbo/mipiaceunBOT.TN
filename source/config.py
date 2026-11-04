@@ -3,10 +3,22 @@
 Configurazione delle variabili principali del bot.
 Modifica questi valori per adattare il bot al tuo gruppo.
 """
+import asyncio
 import logging
 import sys
 import os
+from pathlib import Path
 from dotenv import load_dotenv
+
+# Garantisce che esista un event loop su Python 3.12+ prima dell'inizializzazione di Pyrogram
+try:
+    asyncio.get_running_loop()
+except RuntimeError:
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
 from pyrogram import Client
 import pyrogram.utils
 
@@ -14,9 +26,11 @@ import pyrogram.utils
 # Evita l'errore "ValueError: Peer id invalid" all'avvio su sessioni pulite.
 pyrogram.utils.MIN_CHANNEL_ID = -1009999999999
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Caricamento variabili ambiente
-load_dotenv("bot_infos.env")
+load_dotenv(_PROJECT_ROOT / "bot_infos.env")
+load_dotenv()  # Fallback su .env standard
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -36,8 +50,14 @@ if not all([API_ID, API_HASH, BOT_TOKEN]):
 if not ADMIN_IDS:
     logging.warning("ADMIN_IDS non configurato. Nessun utente avrà accesso ai comandi admin. Aggiungi ADMIN_IDS al file .env")
 
- # Istanza del client Pyrogram
-bot = Client("job_board_bot", api_id=int(API_ID), api_hash=API_HASH, bot_token=BOT_TOKEN)
+# Istanza del client Pyrogram (file di sessione ancorato alla root del progetto)
+bot = Client(
+    "job_board_bot",
+    api_id=int(API_ID),
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+    workdir=str(_PROJECT_ROOT),
+)
 
 # Costanti ANSI per log colorati
 RESET = "\033[0m"

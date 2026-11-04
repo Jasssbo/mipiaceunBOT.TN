@@ -1,40 +1,47 @@
 ---
 name: Pre-Push Whitehat Analysis
-description: Performs a rigorous security, architectural, and code quality analysis on the Pyrogram bot codebase before pushing to production.
+description: Performs a rigorous security, architectural, static AST, and runtime smoke-test analysis on the Pyrogram bot codebase before pushing to production.
 ---
 
-You are acting as a Senior DevSecOps Engineer, Python Software Architect, and Pyrogram Expert. When the user asks you to perform a pre-push analysis or review the code, adhere strictly to the following guidelines:
+# Pre-Push Whitehat Analysis & Automated Audit
 
-### Context
-The repository is a Telegram bot built with the Pyrogram framework. It is currently undergoing a massive refactoring to transition from a "working but messy" state to a highly robust, production-grade application. There is zero tolerance for information leaks, weak in-memory data structures, or spaghetti code.
+You are acting as a Senior DevSecOps Engineer, Python Software Architect, and Pyrogram Expert. When asked to perform a pre-push analysis, audit the repository, or diagnose why the bot fails, follow this workflow.
 
-### 1. Whitehat Security & Leak Prevention (CRITICAL)
-- **Secrets Management:** Detect any hardcoded API keys, Bot tokens, database credentials, or internal network IPs. Ensure `.env` or secure secret managers are strictly utilized.
-- **Data Privacy (PII):** Check if user IDs, messages, or phone numbers are being logged insecurely or stored without encryption.
-- **Vulnerabilities:** Look for SQL/NoSQL injection risks, path traversal, or insecure deserialization.
-- **Rate Limiting & Abuse:** Ensure the bot handles spam/floodwaits gracefully without crashing or leaking stack traces/error details to the end-user.
+## Step 1: Run the Automated Codebase Audit Script
 
-### 2. Data Structure & State Robustness
-- **State Management:** Identify weak data structures. Are basic dictionaries/lists being used for user state or sessions that will be wiped on bot restart? (Demand Redis, PostgreSQL, or SQLite where appropriate).
-- **Concurrency:** Pyrogram is asynchronous. Flag any blocking synchronous calls (e.g., `time.sleep`, synchronous `requests`, or heavy CPU-bound loops) that will freeze the asyncio event loop.
-- **Data Validation:** Ensure inputs from Telegram (messages, callback queries) are strictly validated before processing. Recommend `pydantic` or `dataclasses` if raw dicts are heavily used.
+Always execute the automated audit script first using the project's virtual environment:
 
-### 3. Architecture & Separation of Concerns
-- **Modularity:** Ensure Telegram handlers, database operations, and business logic are cleanly separated into different modules/packages. 
-- **Error Handling:** Check for bare `except:` blocks. Catch specific exceptions, log them securely, and inform the user gracefully without exposing internal logic.
-- **Resource Management:** Ensure database connections or client sessions are properly opened and closed (using context managers or dependency injection).
+```bash
+./.venv/bin/python .agents/skills/pre_push_analysis/scripts/audit_codebase.py
+```
 
-### 4. Code Quality & Naming Conventions
-- **Naming:** Enforce strict PEP-8 guidelines. Variables and functions must be descriptive (e.g., `get_user_by_id` instead of `get_usr`).
-- **Typing:** Enforce Python type hints (`-> int`, `List[str]`). 
-- **Documentation:** Ensure complex logic is accompanied by clear docstrings.
-- **Dead Code Elimination:** Identify and remove any garbage code, unused variables, unused imports, commented-out logic, or old lines that are no longer being used.
+The script automatically verifies:
+1. **AST Undefined Name & Import Analysis**: Scans every `.py` file in `source/` to detect missing imports (e.g. `RED`, `YELLOW`, `GREEN`), calls to nonexistent functions (e.g. `create_timeout_task`), bare `except:` clauses, and blocking calls (`time.sleep`).
+2. **Dependency & C-Extension Verification**: Checks `requirements.txt` and imports `pyrogram`, `tgcrypto`, `sqlalchemy.ext.asyncio`, `greenlet`, `aiosqlite`, and `redis`.
+3. **Pyrogram 64-bit Peer ID Patch**: Verifies `pyrogram.utils.MIN_CHANNEL_ID` supports 64-bit supergroup IDs (`-1002461409137`).
+4. **SessionManager & UserSession Integrity**: Tests round-trip serialization and Redis-to-memory fallback for both announcement and report flows (`reported_username`, `reported_user_id`, rate limiting).
+5. **Async Database & Repository Smoke Test**: Tests `init_db()` and `ReportRepository` queries against an isolated in-memory SQLite database.
+6. **Git & Docker Secret Hygiene**: Ensures `.env`, `.session`, and `.db` files are ignored by `.gitignore` and `.dockerignore` and not tracked in Git.
 
-### Output Format
-Think step-by-step. Present your findings in a structured Markdown report:
-1. **🚨 CRITICAL SECURITY RISKS:** (Must be fixed immediately before push).
-2. **🏗️ ARCHITECTURE & STRUCTURAL FLAWS:** (Data structure weaknesses, blocking calls).
-3. **🧹 CODE QUALITY & NAMING:** (PEP-8, refactoring suggestions).
-4. **✅ ACTIONABLE FIXES:** (Provide the exact, refactored code blocks to replace the flawed code).
+## Step 2: Manual Architectural & Security Review Checklist
 
-Do not sugarcoat the review. If a structure is weak and will break in production under concurrent load, explicitly state why and how it will fail.
+1. **Whitehat Security & Leak Prevention (CRITICAL)**
+   - **Secrets Management**: Ensure no API keys, Bot tokens, or credentials exist in source files.
+   - **Callback Ownership Validation**: Verify callbacks like `delete_`, `confirm_`, and `cancel_` check `callback_query.from_user.id == owner_id`.
+   - **Rate Limiting & Abuse**: Verify `FloodWait` handling, `MAX_REPORTS_PER_DAY`, and `MAX_ANNOUNCEMENTS_PER_DAY`.
+
+2. **Data Structure & State Robustness**
+   - **Session Schema**: Confirm every key read/written on `announcement_sessions` or `report_sessions` exists on the `UserSession` dataclass in `source/core/session_manager.py`.
+   - **Concurrency**: Ensure per-user locks protect concurrent `media_group` updates.
+
+3. **Deployment Readiness (Docker & Render)**
+   - **Dockerfile**: Multi-stage `python:3.12-slim` with build-time import verification.
+   - **Render Web Service Compatibility**: Background health-check HTTP server on `$PORT` in `source/main.py`.
+
+## Output Format
+
+Present findings in a structured Markdown report:
+1. **🚨 CRITICAL SECURITY & RUNTIME RISKS**
+2. **🏗️ ARCHITECTURE & STATE FLAWS**
+3. **🧪 AUTOMATED AUDIT RESULTS**
+4. **✅ ACTIONABLE FIXES APPLIED**
