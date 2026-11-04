@@ -1,4 +1,4 @@
-version: '3.8'
+version: '3.9'
 
 services:
   bot:
@@ -6,30 +6,47 @@ services:
     container_name: mipiaceunbot
     restart: unless-stopped
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy   # Wait for Redis to pass its healthcheck
+    networks:
+      - botnet
     volumes:
-      # Mount bot_infos.env if you want to configure via file outside container
-      - ./bot_infos.env:/app/bot_infos.env
-      # Mount users_data.db to persist data
+      # Mount env file for credentials
+      - ./bot_infos.env:/app/bot_infos.env:ro
+      # Persist SQLite database
       - ./users_data.db:/app/users_data.db
-      # Mount the pyrogram session
+      # Persist Pyrogram session (file must exist on host first — see README)
       - ./job_board_bot.session:/app/job_board_bot.session
-      # Mount backups directory
+      # Persist backups
       - ./backups:/app/backups
     env_file:
       - bot_infos.env
     environment:
-      - TZ=Europe/Rome # Ensure correct timezone for logs and backups
-      - REDIS_URL=redis://redis:6379/0
+      TZ: Europe/Rome
+      REDIS_URL: redis://redis:6379/0
 
   redis:
-    image: redis:alpine
+    image: redis:7-alpine
     container_name: mipiaceunbot_redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    networks:
+      - botnet
+    # Redis port is intentionally NOT published to the host —
+    # the bot accesses it via the internal Docker network only.
     volumes:
       - redis_data:/data
+    # Persist data across restarts with AOF
+    command: redis-server --appendonly yes --appendfsync everysec
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+networks:
+  botnet:
+    driver: bridge
 
 volumes:
   redis_data:

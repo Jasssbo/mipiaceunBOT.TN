@@ -8,6 +8,11 @@ import sys
 import os
 from dotenv import load_dotenv
 from pyrogram import Client
+import pyrogram.utils
+
+# Fix per limitazione di Pyrogram 2.0 sui canali/supergruppi recenti (ID a 64 bit > 2147483647)
+# Evita l'errore "ValueError: Peer id invalid" all'avvio su sessioni pulite.
+pyrogram.utils.MIN_CHANNEL_ID = -1009999999999
 
 
 # Caricamento variabili ambiente

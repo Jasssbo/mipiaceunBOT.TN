@@ -44,7 +44,7 @@ L'utilizzo di `docker-compose` assicura che il bot e il server Redis vengano avv
 ### 1. Clonare il repository
 ```bash
 git clone https://github.com/Jasssbo/mipiaceunBOT.TN.git
-cd mipiaceunBOT
+cd mipiaceunBOT.TN
 ```
 
 ### 2. Configurare le credenziali
@@ -57,11 +57,21 @@ ADMIN_IDS=12345678,87654321
 CHAT_ID=-1001234567890
 ```
 
-### 3. Avviare con Docker Compose
+### 3. Preparare i file di persistenza ⚠️ (passo obbligatorio!)
+```bash
+# Crea il file di sessione Pyrogram PRIMA di avviare Docker.
+# Se non esiste, Docker lo crea come directory e Pyrogram va in crash.
+touch job_board_bot.session
+
+# Crea la cartella dei backup
+mkdir -p backups
+```
+
+### 4. Avviare con Docker Compose
 ```bash
 docker-compose up -d --build
 ```
-Il bot e Redis saranno ora operativi in background. Usa `docker-compose logs -f` per leggere i log.
+Il bot e Redis saranno ora operativi in background. Usa `docker-compose logs -f bot` per leggere i log.
 
 ## 📂 Struttura dell'Architettura (Refactored)
 
@@ -82,12 +92,6 @@ La struttura del progetto segue rigidi principi di Clean Architecture e separazi
   - `reports/`: Sistema di `report_user.py` asincrono.
   - `user_announcements_interactions/`: Handler specifici per il workflow degli annunci.
 - `source/services/`: Servizi globali di messaggistica (`message_service.py`).
-
-## 🤝 Contributi e Linee Guida (Pre-Push)
-Se vuoi contribuire, assicurati di eseguire queste ispezioni prima del push:
-1. **Security Checks**: Nessun `.env` hardcoded.
-2. **Dead Code Elimination**: Elimina eventuali funzioni commentate o moduli importati ma non utilizzati.
-3. **Architettura Asincrona**: Non inserire chiamate sincrone bloccanti all'interno dell'event loop di Pyrogram. Usa sempre `await` e astrazioni asincrone (es: `aiosqlite`).
 
 ## 📄 Licenza
 
