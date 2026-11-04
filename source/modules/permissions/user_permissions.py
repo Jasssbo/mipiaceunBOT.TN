@@ -2,6 +2,7 @@
 Verifica dei permessi utente con cache multi-livello per evitare di sovraccaricare l'API Telegram.
 Supporta sia verifica per user_id che per username, con fallback diretto su get_chat_member.
 """
+import asyncio
 import logging
 import time
 from pyrogram.enums import ChatMemberStatus
@@ -14,6 +15,7 @@ _members_cache = {
     "last_updated": 0.0,
     "ttl_seconds": 300,  # Aggiorna ogni 5 minuti
 }
+_cache_refresh_lock = asyncio.Lock()
 
 _INACTIVE_STATUSES = {
     ChatMemberStatus.LEFT,
@@ -23,29 +25,36 @@ _INACTIVE_STATUSES = {
 
 
 async def _refresh_members_cache(client) -> None:
-    """Aggiorna la cache dei membri del gruppo se scaduta."""
+    """Aggiorna la cache dei membri del gruppo se scaduta (protetta da lock contro stampede concorrenti)."""
     now = time.time()
     if now - _members_cache["last_updated"] < _members_cache["ttl_seconds"]:
         return
 
-    try:
-        usernames = set()
-        user_ids = set()
-        async for member in client.get_chat_members(CHAT_ID):
-            if member.status in (ChatMemberStatus.LEFT, ChatMemberStatus.BANNED):
-                continue
-            if member.user:
-                user_ids.add(member.user.id)
-                if member.user.username:
-                    usernames.add(member.user.username.lower())
-        _members_cache["usernames"] = usernames
-        _members_cache["user_ids"] = user_ids
-        _members_cache["last_updated"] = now
-        logging.debug(
-            f"[CACHE] Aggiornata cache membri del gruppo: {len(user_ids)} utenti ({len(usernames)} con username)"
-        )
-    except Exception as e:
-        logging.warning(f"[CACHE] Impossibile elencare l'intera lista membri ({e}); uso fallback get_chat_member.")
+    async with _cache_refresh_lock:
+        now = time.time()
+        if now - _members_cache["last_updated"] < _members_cache["ttl_seconds"]:
+            return
+
+        try:
+            usernames = set()
+            user_ids = set()
+            async for member in client.get_chat_members(CHAT_ID):
+                if member.status in (ChatMemberStatus.LEFT, ChatMemberStatus.BANNED):
+                    continue
+                if member.user:
+                    user_ids.add(member.user.id)
+                    if member.user.username:
+                        usernames.add(member.user.username.lower())
+            _members_cache["usernames"] = usernames
+            _members_cache["user_ids"] = user_ids
+            _members_cache["last_updated"] = now
+            logging.debug(
+                f"[CACHE] Aggiornata cache membri del gruppo: {len(user_ids)} utenti ({len(usernames)} con username)"
+            )
+        except Exception as e:
+            # Evita retry tempesta ad ogni messaggio se get_chat_members fallisce temporaneamente
+            _members_cache["last_updated"] = now - (_members_cache["ttl_seconds"] - 60)
+            logging.warning(f"[CACHE] Impossibile elencare l'intera lista membri ({e}); uso fallback get_chat_member.")
 
 
 async def is_user_allowed_by_username(client, user) -> bool:

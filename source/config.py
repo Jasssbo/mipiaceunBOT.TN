@@ -67,13 +67,15 @@ if not all([API_ID, API_HASH, BOT_TOKEN]):
 if not ADMIN_IDS:
     logging.warning("ADMIN_IDS non configurato. Nessun utente avrà accesso ai comandi admin. Aggiungi ADMIN_IDS al file .env")
 
-# Istanza del client Pyrogram (file di sessione ancorato alla root del progetto)
+# Istanza del client Pyrogram (file di sessione ancorato alla root del progetto, workers ottimizzati per container 512MB RAM)
 bot = Client(
     "job_board_bot",
     api_id=int(API_ID),
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
     workdir=str(_PROJECT_ROOT),
+    workers=4,
+    sleep_threshold=30,
 )
 
 # Costanti ANSI per log colorati

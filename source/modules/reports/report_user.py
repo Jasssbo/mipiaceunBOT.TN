@@ -8,6 +8,7 @@ Sistema di segnalazione utenti con protezioni di sicurezza e privacy.
 - Rate limiting per prevenire abusi
 """
 import os
+import re
 import logging
 import asyncio
 from datetime import datetime, timedelta
@@ -22,7 +23,15 @@ from core.ui_components import build_back_to_menu_keyboard, build_cancel_report_
 from database.repository import async_session, ReportRepository
 from database.models import Report
 from modules.permissions.user_permissions import invalidate_members_cache
-from middleware.permissions import membership_cache
+from middleware.permissions import membership_cache, require_group_member
+
+_SANITIZE_RE = re.compile(r"[\x00-\x1f\x7f-\x9f*_`\[\]]")
+
+
+def _clean_display(val: str, max_len: int = 100) -> str:
+    """Rimuove caratteri di controllo e sintassi Markdown per prevenire injection nella vista admin."""
+    cleaned = _SANITIZE_RE.sub(" ", str(val or "")).strip()
+    return cleaned[:max_len] if cleaned else "N/A"
 
 # Get report session manager
 report_sessions = get_report_sessions()
@@ -227,10 +236,10 @@ async def admin_reports_handler(client, message: Message):
             text = f"📋 **SEGNALAZIONI** ({total} totali, ultime {len(reports)}):\n\n"
 
             for i, r in enumerate(reversed(reports), 1):
-                reported = r.reported_username or 'N/A'
+                reported = _clean_display(r.reported_username, 40)
                 reported_id = r.reported_user_id or 'N/A'
-                reporter = r.reporter_username or 'N/A'
-                reason = r.reason[:100] if r.reason else 'N/A'
+                reporter = _clean_display(r.reporter_username, 40)
+                reason = _clean_display(r.reason, 100)
                 ts = str(r.timestamp)[:16] if r.timestamp else 'N/A'
                 text += (
                     f"**{i}.** @{reported} (ID: {reported_id})\n"
@@ -336,6 +345,7 @@ async def admin_clear_reports_handler(client, message: Message):
 # ======================== REPORT FLOW HANDLER ========================
 
 @bot.on_message(filters.private & ~filters.command(["start", "privacy", "informativa", "informativa_privacy", "terms", "termini", "tos", "my_data", "miei_dati", "erase_my_data", "erase", "gdpr_erase", "admin_reports", "admin_segnalazioni", "admin_ban", "admin_unban", "admin_clear_reports"]), group=1)
+@require_group_member
 async def report_user_handler(client, message: Message):
     """Handler principale per gestire il flusso di segnalazione utente"""
     user = message.from_user
@@ -351,10 +361,16 @@ async def report_user_handler(client, message: Message):
     # Step 1: attesa username
     if state == "awaiting_username":
 
-        # Ottieni l'username dal messaggio inoltrato o dal testo
-        if message.forward_from and message.forward_from.username:
-            reported_username = message.forward_from.username
+        # Ottieni l'utente dal messaggio inoltrato (anche se l'utente segnalato non ha un @username pubblico) o dal testo
+        if message.forward_from:
             reported_user_id_from_forward = message.forward_from.id
+            reported_username = message.forward_from.username or f"user{reported_user_id_from_forward}"
+        elif getattr(message, "forward_sender_name", None):
+            await message.reply(
+                "❌ L'utente ha la privacy sugli inoltri attiva e Telegram non espone il suo ID tramite inoltro.\n"
+                "Per favore, scrivi direttamente il suo @username."
+            )
+            return
         elif message.text:
             reported_username = message.text.strip().lstrip("@")
             reported_user_id_from_forward = None
@@ -362,8 +378,8 @@ async def report_user_handler(client, message: Message):
             await message.reply("❌ Formato non valido. Invia un @username o inoltra un messaggio dell'utente da segnalare.")
             return
 
-        # Validazione username
-        if not reported_username or len(reported_username) < 3 or ' ' in reported_username:
+        # Validazione username (se inserito testualmente)
+        if reported_user_id_from_forward is None and (not reported_username or len(reported_username) < 3 or ' ' in reported_username):
             logging.warning(f"[REPORT] Username non valido ricevuto da user_id={user_id}")
             await message.reply("❌ Username non valido. Invia un @username valido o inoltra un messaggio dell'utente da segnalare.")
             return
@@ -385,37 +401,38 @@ async def report_user_handler(client, message: Message):
                 await report_sessions.delete_session(user_id)
                 return
 
-            # Verifica se l'username esiste nel gruppo
+            # Verifica se l'utente esiste nel gruppo
             reported_user_id = reported_user_id_from_forward
             try:
-                try:
-                    chat = await client.get_chat(reported_username)
-                except Exception:
-                    chat = None
-
-                if not chat:
+                if reported_user_id is None:
                     try:
-                        chat = await client.get_chat(f"@{reported_username}")
+                        chat = await client.get_chat(reported_username)
                     except Exception:
                         chat = None
 
-                if not chat:
-                    logging.warning(f"[REPORT] Username non trovato: '{reported_username}' (da user_id={user_id})")
-                    buttons = build_back_to_menu_keyboard()
-                    await message.reply(
-                        f"❌ L'username @{reported_username} non esiste o non appartiene a nessun utente nel gruppo.\n\n"
-                        "📝 Puoi:\n"
-                        "• Inviare subito un altro @username\n"
-                        "• Tornare al menù principale",
-                        reply_markup=buttons
-                    )
-                    return
+                    if not chat:
+                        try:
+                            chat = await client.get_chat(f"@{reported_username}")
+                        except Exception:
+                            chat = None
 
-                reported_user_id = chat.id
+                    if not chat:
+                        logging.warning(f"[REPORT] Username non trovato: '{_clean_display(reported_username, 40)}' (da user_id={user_id})")
+                        buttons = build_back_to_menu_keyboard()
+                        await message.reply(
+                            f"❌ L'username @{reported_username} non esiste o non appartiene a nessun utente nel gruppo.\n\n"
+                            "📝 Puoi:\n"
+                            "• Inviare subito un altro @username\n"
+                            "• Tornare al menù principale",
+                            reply_markup=buttons
+                        )
+                        return
+
+                    reported_user_id = chat.id
 
                 # Verifichiamo se l'utente è nel gruppo
                 try:
-                    member = await client.get_chat_member(CHAT_ID, chat.id)
+                    member = await client.get_chat_member(CHAT_ID, reported_user_id)
                     if not member:
                         raise ValueError("User not in group")
                 except Exception:
@@ -430,7 +447,7 @@ async def report_user_handler(client, message: Message):
                     return
 
             except Exception as e:
-                logging.warning(f"[REPORT] Errore verifica username '{reported_username}': {e}")
+                logging.warning(f"[REPORT] Errore verifica username '{_clean_display(reported_username, 40)}': {e}")
                 buttons = build_back_to_menu_keyboard()
                 await message.reply(
                     f"❌ Non riesco a verificare l'username @{reported_username}. Assicurati che sia corretto.\n\n"

@@ -5,6 +5,7 @@ Handles message deletion, sending, and tracking across user sessions.
 import logging
 import asyncio
 from typing import List, Optional, Dict, Set
+from cachetools import TTLCache
 from pyrogram import errors, Client
 from pyrogram.types import InlineKeyboardMarkup, Message
 from tenacity import (
@@ -15,21 +16,30 @@ from tenacity import (
     RetryError
 )
 
+# Solo errori transitori di rete/rate-limit devono attivare il retry (non BadRequest o Forbidden)
+_TRANSIENT_ERRORS = (
+    errors.FloodWait,
+    errors.InternalServerError,
+    errors.ServiceUnavailable,
+    OSError,
+    TimeoutError,
+)
+
 
 class MessageService:
     """
     Centralized service for handling Telegram messages with retry logic.
-    Tracks messages per user and provides batch operations.
+    Tracks messages per user in a bounded TTLCache and provides batch operations.
     """
     
     def __init__(self):
-        # Track messages per user for batch operations
-        self._user_messages: Dict[int, Set[int]] = {}
+        # Track messages per user with bounded memory (max 1000 users, 30 min TTL)
+        self._user_messages: TTLCache = TTLCache(maxsize=1000, ttl=1800)
     
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential(min=1, max=60),
-        retry=retry_if_exception_type((errors.FloodWait, errors.RPCError)),
+        wait=wait_exponential(min=1, max=30),
+        retry=retry_if_exception_type(_TRANSIENT_ERRORS),
         reraise=True
     )
     async def delete_message(self, client: Client, chat_id: int, message_id: int) -> bool:
@@ -47,9 +57,9 @@ class MessageService:
         try:
             await client.delete_messages(chat_id, message_id)
             return True
-        except errors.MessageDeleteForbidden:
-            # Cannot delete this message (e.g., too old, not ours)
-            logging.debug(f"Cannot delete message {message_id} in chat {chat_id}: forbidden")
+        except (errors.MessageDeleteForbidden, errors.MessageIdInvalid):
+            # Cannot delete this message (e.g., too old, already deleted, not ours)
+            logging.debug(f"Cannot delete message {message_id} in chat {chat_id}: forbidden or invalid")
             return False
         except errors.FloodWait as e:
             # Respect Telegram's required wait time
@@ -57,9 +67,13 @@ class MessageService:
             await asyncio.sleep(e.value)
             # Let tenacity handle the retry after waiting
             raise
+        except (errors.BadRequest, errors.Forbidden) as e:
+            # Errori permanenti lato client/permessi: non ritentare
+            logging.debug(f"Non-retriable RPCError deleting message {message_id}: {e}")
+            return False
         except errors.RPCError as e:
-            # Let tenacity handle the retry
-            logging.warning(f"RPCError when deleting message {message_id}: {e}")
+            # Let tenacity handle transient server-side RPCError
+            logging.warning(f"Transient RPCError when deleting message {message_id}: {e}")
             raise
         except Exception as e:
             logging.error(f"Unexpected error deleting message {message_id}: {e}")
@@ -96,8 +110,8 @@ class MessageService:
     
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential(min=1, max=60),
-        retry=retry_if_exception_type((errors.FloodWait, errors.RPCError)),
+        wait=wait_exponential(min=1, max=30),
+        retry=retry_if_exception_type(_TRANSIENT_ERRORS),
         reraise=True
     )
     async def send_message(self, client: Client, chat_id: int, text: str,
@@ -123,8 +137,11 @@ class MessageService:
             await asyncio.sleep(e.value)
             # Let tenacity handle the retry after waiting
             raise
+        except (errors.BadRequest, errors.Forbidden) as e:
+            logging.warning(f"Non-retriable error sending message to {chat_id}: {e}")
+            return None
         except errors.RPCError as e:
-            logging.warning(f"RPCError when sending message: {e}")
+            logging.warning(f"Transient RPCError when sending message: {e}")
             raise
         except Exception as e:
             logging.error(f"Unexpected error sending message: {e}")

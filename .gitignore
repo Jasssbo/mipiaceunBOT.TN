@@ -2,8 +2,7 @@
 *.env
 reports.json
 reports.json.lock
-users_data.db
-
+/users_data.db
 # Esclude database SQLite e backup locali
 *.db
 *.db-journal

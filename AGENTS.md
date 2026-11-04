@@ -43,9 +43,15 @@ This document defines mandatory engineering, security, anti-slop, and deployment
 4. **Redis Resilience (Zero-Crash Guarantee)**:
    - `SessionManager` MUST catch `(RedisError, OSError)` on all Redis operations and transparently fall back to its in-memory TTL store so the bot never crashes if Redis is unconfigured or temporarily unreachable.
 
-5. **Async Concurrency & Non-Blocking Execution**:
+5. **Async Concurrency, Bounded Memory & Non-Blocking Execution**:
    - Never use synchronous blocking calls (`time.sleep`, `requests`) inside async handlers.
-   - Protect multi-message handlers (`collect_data_handler`) with per-user `asyncio.Lock`.
+   - Protect multi-message handlers (`collect_data_handler`) with per-user `asyncio.Lock` stored in a bounded `cachetools.TTLCache` (never an unbounded `dict`).
+
+6. **OWASP Security Invariants**:
+   - **A01 Broken Access Control**: `@require_group_member` MUST decorate `/start`, `buttons_callback_handler`, `collect_data_handler`, and `report_user_handler`. GDPR endpoints (`/privacy`, `/terms`, `/my_data`, `/erase_my_data`) MUST remain accessible to all users per GDPR Art. 15 & 17.
+   - **A08 Software & Data Integrity (`delete_` Callback Signing)**: Inline `delete_` callbacks MUST be signed and verified in constant time with HMAC-SHA256 (`sign_delete_callback` / `verify_delete_callback` in `source/modules/core/buttons.py`) and encoded compactly (`<= 64` bytes) so an attacker cannot tamper with `callback_data` to delete arbitrary group messages.
+   - **A09 Security Logging & Monitoring**: User-supplied inputs and usernames MUST be sanitized against CRLF and ANSI escape sequences (`_sanitize_log`) before being written to logs.
+   - **Telegram API Constraints**: Media captions (`send_photo`, `send_document`, `send_media_group`) MUST be capped at `<= 1024` characters, and `multi_file` uploads MUST enforce `MAX_FILES_PER_ANNOUNCEMENT = 10` while sending single-file uploads via `send_photo`/`send_document` instead of `send_media_group` (which requires 2–10 items).
 
 ---
 

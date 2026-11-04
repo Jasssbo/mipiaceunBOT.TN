@@ -76,13 +76,18 @@ _VALID_SESSION_FIELDS = {f.name for f in fields(UserSession)}
 class SessionManager:
     """
     Manages user sessions with Redis primary storage and automatic in-memory TTL fallback.
-    Ensures the bot never crashes even if Redis is temporarily unreachable or unconfigured.
+    Ensures the bot never crashes even if Redis is temporarily unreachable or unconfigured,
+    and guarantees bounded memory usage via automatic TTL eviction.
     """
+
+    DEFAULT_SESSION_TTL: int = 1800  # 30 minuti di TTL di sicurezza predefinito per evitare sessioni orfane
+    MAX_MEMORY_ITEMS: int = 2000  # Limite massimo chiavi nello store di fallback in RAM
 
     _redis_down_until: float = 0.0
     _fallback_warned: bool = False
-    # Shared in-memory fallback store: key -> (value_str, expire_timestamp_or_None)
+    # Shared in-memory fallback store: key -> (value_str, expire_timestamp)
     _memory_store: Dict[str, Tuple[str, Optional[float]]] = {}
+    _ops_counter: int = 0
 
     def __init__(self, prefix: str):
         self.prefix = prefix
@@ -110,7 +115,7 @@ class SessionManager:
             )
             SessionManager._fallback_warned = True
 
-    # --- Low-level resilient KV operations ---
+    # --- Low-level resilient KV operations with bounded memory ---
     def _mem_cleanup_key(self, key: str) -> None:
         entry = SessionManager._memory_store.get(key)
         if entry is not None:
@@ -118,7 +123,31 @@ class SessionManager:
             if exp is not None and time.time() >= exp:
                 SessionManager._memory_store.pop(key, None)
 
+    def _mem_periodic_sweep(self) -> None:
+        """Pulisce periodicamente le chiavi scadute in RAM e applica il cap MAX_MEMORY_ITEMS."""
+        SessionManager._ops_counter += 1
+        if SessionManager._ops_counter % 50 != 0 and len(SessionManager._memory_store) <= self.MAX_MEMORY_ITEMS:
+            return
+        now = time.time()
+        expired_keys = [
+            k for k, (_, exp) in SessionManager._memory_store.items()
+            if exp is not None and now >= exp
+        ]
+        for k in expired_keys:
+            SessionManager._memory_store.pop(k, None)
+
+        # Se ancora sopra la soglia massima, rimuovi le voci con scadenza più vicina (FIFO/TTL eviction)
+        overflow = len(SessionManager._memory_store) - self.MAX_MEMORY_ITEMS
+        if overflow > 0:
+            sorted_keys = sorted(
+                SessionManager._memory_store.keys(),
+                key=lambda k: SessionManager._memory_store[k][1] or float("inf"),
+            )
+            for k in sorted_keys[:overflow]:
+                SessionManager._memory_store.pop(k, None)
+
     async def _kv_get(self, key: str) -> Optional[str]:
+        self._mem_periodic_sweep()
         if self._is_redis_available():
             try:
                 val = await self.redis.get(key)
@@ -131,22 +160,20 @@ class SessionManager:
         return entry[0] if entry else None
 
     async def _kv_set(self, key: str, value: str, ex: Optional[int] = None) -> None:
-        exp_ts = (time.time() + ex) if ex else None
-        # Always mirror to memory store for seamless fallback
+        self._mem_periodic_sweep()
         existing = SessionManager._memory_store.get(key)
-        if exp_ts is None and existing is not None:
+        if ex is not None:
+            exp_ts = time.time() + ex
+        elif existing is not None and existing[1] is not None and existing[1] > time.time():
             exp_ts = existing[1]
+        else:
+            exp_ts = time.time() + self.DEFAULT_SESSION_TTL
         SessionManager._memory_store[key] = (value, exp_ts)
 
         if self._is_redis_available():
             try:
-                if ex:
-                    await self.redis.set(key, value, ex=ex)
-                else:
-                    ttl = await self.redis.ttl(key)
-                    await self.redis.set(key, value)
-                    if ttl and ttl > 0:
-                        await self.redis.expire(key, ttl)
+                effective_ex = ex if ex is not None else max(1, int(exp_ts - time.time()))
+                await self.redis.set(key, value, ex=effective_ex)
                 SessionManager._fallback_warned = False
             except (RedisError, OSError) as e:
                 self._handle_redis_failure(e)

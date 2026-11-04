@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy import select, func, delete, or_
+from sqlalchemy import select, func, delete, or_, text
 from .models import Base, Report
 
 # Anchor default SQLite file to repository root (/app/users_data.db)
@@ -19,11 +19,16 @@ _db_initialized = False
 
 
 async def init_db() -> None:
-    """Inizializza le tabelle del database in modo idempotente."""
+    """Inizializza le tabelle del database in modo idempotente e ottimizza SQLite (WAL + cache limitata)."""
     global _db_initialized
     if _db_initialized:
         return
     async with engine.begin() as conn:
+        if DB_PATH.startswith("sqlite"):
+            await conn.execute(text("PRAGMA journal_mode=WAL;"))
+            await conn.execute(text("PRAGMA synchronous=NORMAL;"))
+            await conn.execute(text("PRAGMA busy_timeout=5000;"))
+            await conn.execute(text("PRAGMA cache_size=-4000;"))  # Max ~4MB RAM cache per SQLite
         await conn.run_sync(Base.metadata.create_all)
     _db_initialized = True
 

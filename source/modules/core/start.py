@@ -19,8 +19,11 @@ from middleware.permissions import require_group_member
 @require_group_member
 async def start_handler(client, message: Message):
     user = message.from_user
-    username = user.username if user.username else user.first_name
-    logging.info(f"[START] L'Utente @{username} ha avviato una conversazione con il bot")
+    if not user:
+        return
+    raw_name = user.username if user.username else (user.first_name or f"user{user.id}")
+    username = "".join(ch if ord(ch) >= 32 and ord(ch) != 127 else " " for ch in raw_name)[:40]
+    logging.info(f"[START] L'Utente @{username} (user_id={user.id}) ha avviato una conversazione con il bot")
     
     # Check if the user is an adult and accepts terms
     # For now, we will show a consent message with inline buttons

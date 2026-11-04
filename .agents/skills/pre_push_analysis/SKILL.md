@@ -1,5 +1,5 @@
 ---
-name: Pre-Push Whitehat Analysis
+name: pre-push-whitehat-analysis
 description: Performs a rigorous security, architectural, anti-AI-slop, Markdown prompt-injection sanitization, static AST, and runtime smoke-test analysis on the Pyrogram bot codebase before pushing to production.
 ---
 

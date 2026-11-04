@@ -3,7 +3,9 @@ Gestione completa degli annunci: dalla raccolta dati alla pubblicazione.
 """
 import logging
 import asyncio
+import re
 from typing import Optional, Dict, List, Union
+from cachetools import TTLCache
 from pyrogram import filters
 from pyrogram.types import (
     InlineKeyboardMarkup, 
@@ -21,6 +23,7 @@ from config import (
 )
 from .utils.message_utils import safe_delete, send_clean_message
 from modules.permissions.user_permissions import is_user_allowed_by_username
+from middleware.permissions import require_group_member
 from core.session_manager import get_announcement_sessions
 from services.message_service import get_message_service
 from core.ui_components import build_main_menu_keyboard
@@ -29,16 +32,31 @@ from core.ui_components import build_main_menu_keyboard
 sessions = get_announcement_sessions()
 msg_service = get_message_service()
 
-# Per-user lock per prevenire race condition nell'invio di album (media_group)
-_user_locks: Dict[int, asyncio.Lock] = {}
+# Limite massimo Telegram per send_media_group (2..10 elementi)
+MAX_FILES_PER_ANNOUNCEMENT = 10
+
+# Per-user lock con TTL per prevenire race condition nell'invio di album senza memory leak (OWASP A10)
+_user_locks: TTLCache = TTLCache(maxsize=2000, ttl=1800)
 # Task di timeout attivi per utente (evita che vecchi timer scadano su nuove sessioni)
 _timeout_tasks: Dict[int, asyncio.Task] = {}
 
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def _sanitize_log(value: str, max_len: int = 80) -> str:
+    """Rimuove caratteri di controllo, newline e sequenze ANSI per prevenire Log Injection (OWASP A09)."""
+    cleaned = _CONTROL_CHARS_RE.sub(" ", str(value or "")).strip()
+    if len(cleaned) > max_len:
+        return cleaned[: max_len - 3] + "..."
+    return cleaned
+
 
 def _get_user_lock(user_id: int) -> asyncio.Lock:
-    if user_id not in _user_locks:
-        _user_locks[user_id] = asyncio.Lock()
-    return _user_locks[user_id]
+    lock = _user_locks.get(user_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _user_locks[user_id] = lock
+    return lock
 
 
 def cancel_compilation_timeout(user_id: int) -> None:
@@ -101,6 +119,7 @@ async def send_preview(client, user_id: int, info: Dict) -> int:
     """Invia la preview dell'annuncio all'utente."""
     user = await client.get_users(user_id)
     text = build_announcement_text(info, user)
+    caption_text = text[:1020] + "…" if len(text) > 1024 else text
     files = info.get("files", {})
     multi_file_label = None
     multi_file_list = []
@@ -113,12 +132,22 @@ async def send_preview(client, user_id: int, info: Dict) -> int:
     
     preview_noid_msg_ids = []
     if multi_file_list:
-        media = []
-        for idx, f in enumerate(multi_file_list):
+        if len(multi_file_list) == 1:
+            f = multi_file_list[0]
             if f["file_type"] == "photo":
-                media.append(InputMediaPhoto(f["file_id"], caption=text if idx == 0 else None))
+                msg = await client.send_photo(user_id, f["file_id"], caption=caption_text)
             else:
-                media.append(InputMediaDocument(f["file_id"], caption=text if idx == 0 else None))
+                msg = await client.send_document(user_id, f["file_id"], caption=caption_text)
+            preview_noid_msg_ids = [msg.id]
+            info["preview_noid_msg_ids"] = preview_noid_msg_ids
+            return msg.id
+
+        media = []
+        for idx, f in enumerate(multi_file_list[:MAX_FILES_PER_ANNOUNCEMENT]):
+            if f["file_type"] == "photo":
+                media.append(InputMediaPhoto(f["file_id"], caption=caption_text if idx == 0 else None))
+            else:
+                media.append(InputMediaDocument(f["file_id"], caption=caption_text if idx == 0 else None))
         msgs = await client.send_media_group(user_id, media)
         preview_noid_msg_ids = [m.id for m in msgs]
         info["preview_noid_msg_ids"] = preview_noid_msg_ids
@@ -128,12 +157,12 @@ async def send_preview(client, user_id: int, info: Dict) -> int:
     file_type = info.get("file_type")
     if file_id:
         if file_type == "photo":
-            msg = await client.send_photo(user_id, file_id, caption=text)
+            msg = await client.send_photo(user_id, file_id, caption=caption_text)
         else:
-            msg = await client.send_document(user_id, file_id, caption=text)
+            msg = await client.send_document(user_id, file_id, caption=caption_text)
         preview_noid_msg_ids = [msg.id]
     else:
-        msg = await client.send_message(user_id, text)
+        msg = await client.send_message(user_id, text[:4096])
         preview_noid_msg_ids = [msg.id]
     
     info["preview_noid_msg_ids"] = preview_noid_msg_ids
@@ -148,6 +177,7 @@ async def publish_announcement(client, user_id: int, info: Dict) -> Optional[Dic
     """
     user = await client.get_users(user_id)
     text = build_announcement_text(info, user, show_id=None)
+    caption_text = text[:1020] + "…" if len(text) > 1024 else text
     files = info.get("files", {})
     multi_file_label = None
     multi_file_list = []
@@ -166,12 +196,23 @@ async def publish_announcement(client, user_id: int, info: Dict) -> Optional[Dic
         thread_id = POINTER_MESSAGE_IDS[category]
         
         if multi_file_list:
-            media = []
-            for idx, f in enumerate(multi_file_list):
+            if len(multi_file_list) == 1:
+                f = multi_file_list[0]
                 if f["file_type"] == "photo":
-                    media.append(InputMediaPhoto(f["file_id"], caption=text if idx == 0 else None))
+                    msg = await client.send_photo(CHAT_ID, f["file_id"], caption=caption_text, reply_to_message_id=thread_id)
                 else:
-                    media.append(InputMediaDocument(f["file_id"], caption=text if idx == 0 else None))
+                    msg = await client.send_document(CHAT_ID, f["file_id"], caption=caption_text, reply_to_message_id=thread_id)
+                return {
+                    'message_id': msg.id,
+                    'media_ids': [msg.id]
+                }
+
+            media = []
+            for idx, f in enumerate(multi_file_list[:MAX_FILES_PER_ANNOUNCEMENT]):
+                if f["file_type"] == "photo":
+                    media.append(InputMediaPhoto(f["file_id"], caption=caption_text if idx == 0 else None))
+                else:
+                    media.append(InputMediaDocument(f["file_id"], caption=caption_text if idx == 0 else None))
             msgs = await client.send_media_group(CHAT_ID, media, reply_to_message_id=thread_id)
             return {
                 'message_id': msgs[0].id,
@@ -182,11 +223,11 @@ async def publish_announcement(client, user_id: int, info: Dict) -> Optional[Dic
         file_type = info.get("file_type")
         if file_id:
             if file_type == "photo":
-                msg = await client.send_photo(CHAT_ID, file_id, caption=text, reply_to_message_id=thread_id)
+                msg = await client.send_photo(CHAT_ID, file_id, caption=caption_text, reply_to_message_id=thread_id)
             else:
-                msg = await client.send_document(CHAT_ID, file_id, caption=text, reply_to_message_id=thread_id)
+                msg = await client.send_document(CHAT_ID, file_id, caption=caption_text, reply_to_message_id=thread_id)
         else:
-            msg = await client.send_message(CHAT_ID, text, reply_to_message_id=thread_id)
+            msg = await client.send_message(CHAT_ID, text[:4096], reply_to_message_id=thread_id)
         
         return {
             'message_id': msg.id,
@@ -266,7 +307,7 @@ async def cleanup_user_data_and_messages(client, user_id: int, reason: str = "",
     await msg_service.send_message(client, user_id, msg, keyboard)
 
 async def start_compilation_timeout(client, user_id: int, timeout: int):
-    """Avvia il timer per il timeout della compilazione."""
+    """Avvia il timer per il timeout della compilazione e rilascia sempre il riferimento al task in memoria."""
     try:
         await asyncio.sleep(timeout)
         if await sessions.has_session(user_id):
@@ -276,16 +317,20 @@ async def start_compilation_timeout(client, user_id: int, timeout: int):
                 await cleanup_user_data_and_messages(client, user_id, cleanup_type="timeout")
     except asyncio.CancelledError:
         pass
+    finally:
+        if _timeout_tasks.get(user_id) is asyncio.current_task():
+            _timeout_tasks.pop(user_id, None)
 
 # ------------------------ HANDLER PRINCIPALE ------------------------
 @bot.on_message(filters.private & ~filters.command(["start", "privacy", "informativa", "informativa_privacy", "terms", "termini", "tos", "my_data", "miei_dati", "erase_my_data", "erase", "gdpr_erase", "admin_reports", "admin_segnalazioni", "admin_ban", "admin_unban", "admin_clear_reports"]))
+@require_group_member
 async def collect_data_handler(client, message: Message):
     """Handler principale per la raccolta dati utente."""
     user = message.from_user
     if not user:
         return
     user_id = user.id
-    username = user.username if user.username else f"user{user_id}"
+    username = _sanitize_log(user.username if user.username else f"user{user_id}", max_len=40)
 
     async with _get_user_lock(user_id):
         # Gestisci solo utenti con sessione attiva e categoria impostata
@@ -361,10 +406,20 @@ async def collect_data_handler(client, message: Message):
                     await proceed_to_next_step(client, user.id, info, cat)
                     return
 
+                # Verifica limite massimo di file per annuncio (10 per media_group Telegram)
+                if (message.photo or message.document) and len(info["files"][label_text]) >= MAX_FILES_PER_ANNOUNCEMENT:
+                    error_msg = await client.send_message(
+                        user.id,
+                        f"⚠️ Hai raggiunto il limite massimo di {MAX_FILES_PER_ANNOUNCEMENT} file per annuncio. Premi /done per continuare.",
+                    )
+                    await sessions.set_error_message(user_id, error_msg.id)
+                    return
+
                 # Gestione media group
                 if getattr(message, "media_group_id", None) and message.photo:
                     for photo in message.photo if isinstance(message.photo, list) else [message.photo]:
-                        await add_file_and_confirm(client, user.id, info, label_text, photo.file_id, "photo")
+                        if len(info["files"][label_text]) < MAX_FILES_PER_ANNOUNCEMENT:
+                            await add_file_and_confirm(client, user.id, info, label_text, photo.file_id, "photo")
                     logging.info(
                         f"{BLUE}[COMPILAZIONE {category_name}] @{username} (step {step + 1}/{total_steps}) "
                         f"ha caricato foto per '{label_text}' (totale: {len(info['files'][label_text])}){RESET}"
@@ -427,9 +482,7 @@ async def collect_data_handler(client, message: Message):
                 else:
                     clean_text = message.text.strip()
                     info["answers"][label_text] = clean_text
-                    preview_val = clean_text.replace("\n", " ")
-                    if len(preview_val) > 80:
-                        preview_val = preview_val[:77] + "..."
+                    preview_val = _sanitize_log(clean_text, max_len=80)
                     logging.info(
                         f"{GREEN}[COMPILAZIONE {category_name}] @{username} (step {step + 1}/{total_steps}) "
                         f"ha inserito '{label_text}' -> \"{preview_val}\"{RESET}"

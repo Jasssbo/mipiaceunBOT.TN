@@ -285,6 +285,10 @@ class UndefinedNameVisitor(ast.NodeVisitor):
         self.visit(node.body)
         self.scopes.pop()
 
+    def visit_NamedExpr(self, node: ast.NamedExpr):
+        self.visit(node.value)
+        self._define_target(node.target)
+
     def visit_Name(self, node: ast.Name):
         if isinstance(node.ctx, ast.Load):
             if not self._is_defined(node.id):
@@ -369,17 +373,39 @@ async def check_runtime_components() -> List[str]:
 
         # Verify all bot modules and handlers import cleanly
         import modules.core.start
-        import modules.core.buttons
+        import modules.core.buttons as buttons_mod
         import modules.permissions.user_permissions
         import modules.permissions.topic_permissions
         import modules.user_announcements_interactions.announcement_handler
         import modules.reports.report_user
+
+        # Test OWASP A08 HMAC callback signature & 64-byte Telegram limit for 10-photo album
+        sample_ids = list(range(100001, 100011))
+        cb_data = buttons_mod.sign_delete_callback(5000000001, sample_ids)
+        if len(cb_data.encode("utf-8")) > 64:
+            errors.append(f"[OWASP CALLBACK] delete_ callback exceeds 64-byte Telegram limit ({len(cb_data)} bytes): {cb_data}")
+        parts = cb_data.split("_")
+        if not buttons_mod.verify_delete_callback(int(parts[1]), parts[2], parts[3]):
+            errors.append("[OWASP CALLBACK] Valid HMAC signature rejected by verify_delete_callback")
+        if buttons_mod.verify_delete_callback(int(parts[1]), "463,466,467", parts[3]):
+            errors.append("[OWASP CALLBACK] Tampered message IDs accepted by verify_delete_callback!")
+        if buttons_mod.decode_msg_ids(parts[2]) != sample_ids:
+            errors.append("[OWASP CALLBACK] decode_msg_ids did not round-trip contiguous album IDs")
     except Exception as e:
         errors.append(f"[MODULE / STORAGE ERROR] Failed runtime verification: {e}")
 
-    # Test SessionManager & UserSession (both announcement and report flows + fallback)
+    # Test SessionManager & UserSession (both announcement and report flows + fallback + memory bounds)
     try:
+        from cachetools import TTLCache
         from core.session_manager import SessionManager
+        from modules.user_announcements_interactions.announcement_handler import _user_locks
+        from services.message_service import get_message_service
+
+        if not isinstance(_user_locks, TTLCache):
+            errors.append("[MEMORY MANAGEMENT] announcement_handler._user_locks must be a bounded TTLCache")
+        if not isinstance(get_message_service()._user_messages, TTLCache):
+            errors.append("[MEMORY MANAGEMENT] MessageService._user_messages must be a bounded TTLCache")
+
         sm = SessionManager("audit_test")
         await sm.create_session(999001, {"category": "job", "step": 0})
         await sm.update_session(999001, {

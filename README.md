@@ -1,7 +1,7 @@
 # mipiaceunBOT - Piattaforma Comunitaria per Professionisti Creativi
 
-![Version](https://img.shields.io/badge/versione-2.0-blue)
-![Python](https://img.shields.io/badge/python-3.10+-green)
+![Version](https://img.shields.io/badge/versione-2.1-blue)
+![Python](https://img.shields.io/badge/python-3.12+-green)
 ![Docker](https://img.shields.io/badge/docker-supported-blue)
 ![License](https://img.shields.io/badge/licenza-AGPL--3.0-yellow)
 
@@ -31,8 +31,8 @@ Il bot gestisce il flusso di creazione degli annunci con un'interfaccia a botton
 
 ## 🛠️ Requisiti Tecnici
 
-- **Python 3.10 o superiore**
-- **Redis Server** (per il session management in-memory)
+- **Python 3.12 o superiore**
+- **Redis Server** (primario per il session management distribuito, con fallback automatico in-memory con TTL)
 - **Credenziali Telegram**:
   - `API_ID` e `API_HASH` da https://my.telegram.org
   - `BOT_TOKEN` da [@BotFather](https://t.me/BotFather)
@@ -57,15 +57,11 @@ ADMIN_IDS=12345678,87654321
 CHAT_ID=-1001234567890
 ```
 
-### 3. Preparare i file di persistenza ⚠️ (passo obbligatorio!)
+### 3. Preparare la cartella dei backup
 ```bash
-# Crea il file di sessione Pyrogram PRIMA di avviare Docker.
-# Se non esiste, Docker lo crea come directory e Pyrogram va in crash.
-touch job_board_bot.session
-
-# Crea la cartella dei backup
 mkdir -p backups
 ```
+*(Nota: non è necessario né consigliato eseguire manualmente `touch` sui file `.session`; Pyrogram inizializza autonomamente il database SQLite della sessione al primo avvio).*
 
 ### 4. Avviare con Docker Compose
 ```bash

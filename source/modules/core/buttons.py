@@ -3,11 +3,14 @@ Handler per tutte le interazioni con i bottoni InlineKeyboard.
 """
 import logging
 import asyncio
+import hashlib
+import hmac
+from typing import List
 from pyrogram import filters
 from pyrogram.errors import FloodWait
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from config import (
-    CATEGORY_QUESTIONS, CATEGORY_NAMES, bot, CHAT_ID, YELLOW, GREEN, RED, BLUE, RESET,
+    CATEGORY_QUESTIONS, CATEGORY_NAMES, bot, BOT_TOKEN, CHAT_ID, YELLOW, GREEN, RED, BLUE, RESET,
     POINTER_MESSAGE_IDS, announce_timeout, report_timeout, MAX_ANNOUNCEMENTS_PER_DAY
 )
 from modules.user_announcements_interactions.utils.message_utils import send_clean_message, safe_delete
@@ -20,6 +23,59 @@ from core.ui_components import build_main_menu_keyboard, build_back_to_menu_keyb
 announcement_sessions = get_announcement_sessions()
 report_sessions = get_report_sessions()
 msg_service = get_message_service()
+
+
+def encode_msg_ids(ann_ids: List[int]) -> str:
+    """Codifica gli ID dei messaggi in modo compatto (es. '100-105' se contigui) per rispettare il limite di 64 byte."""
+    if not ann_ids:
+        return ""
+    if len(ann_ids) > 2 and ann_ids == list(range(ann_ids[0], ann_ids[-1] + 1)):
+        return f"{ann_ids[0]}-{ann_ids[-1]}"
+    return ",".join(str(i) for i in ann_ids)
+
+
+def decode_msg_ids(ids_str: str) -> List[int]:
+    """Decodifica la stringa degli ID dei messaggi (supporta sia range 'start-end' che lista separata da virgole)."""
+    if not ids_str or ids_str == "None":
+        return []
+    if "-" in ids_str and "," not in ids_str:
+        start_s, end_s = ids_str.split("-", 1)
+        start_i, end_i = int(start_s), int(end_s)
+        if 0 < end_i - start_i <= 15 and start_i > 0:
+            return list(range(start_i, end_i + 1))
+        raise ValueError("Intervallo ID non valido")
+    result = [int(i) for i in ids_str.split(",") if i and i != "None"]
+    if len(result) > 15 or any(i <= 0 for i in result):
+        raise ValueError("Lista ID non valida")
+    return result
+
+
+def sign_delete_callback(owner_id: int, ann_ids: List[int]) -> str:
+    """
+    Genera un callback_data firmato con HMAC-SHA256 (troncato a 10 hex) per prevenire
+    la manomissione degli ID dei messaggi da eliminare nel gruppo (OWASP A01/A08)
+    e rispettare il limite di 64 byte di Telegram per callback_data.
+    Formato: delete_{owner_id}_{ids_encoded}_{sig10}
+    """
+    ids_encoded = encode_msg_ids(ann_ids)
+    payload = f"{owner_id}_{ids_encoded}"
+    sig = hmac.new(
+        (BOT_TOKEN or "").encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:10]
+    return f"delete_{payload}_{sig}"
+
+
+def verify_delete_callback(owner_id: int, ids_encoded: str, sig: str) -> bool:
+    """Verifica in tempo costante la firma HMAC del bottone di eliminazione annuncio."""
+    payload = f"{owner_id}_{ids_encoded}"
+    expected = hmac.new(
+        (BOT_TOKEN or "").encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:10]
+    return hmac.compare_digest(sig, expected)
 
 
 
@@ -61,8 +117,11 @@ async def buttons_callback_handler(client, callback_query: CallbackQuery):
 
 async def _handle_callback(client, callback_query: CallbackQuery):
     user = callback_query.from_user
-    username = user.username if user.username else f"user{user.id}"
-    user_id = callback_query.from_user.id
+    if not user:
+        return
+    raw_username = user.username if user.username else f"user{user.id}"
+    username = "".join(ch if ord(ch) >= 32 and ord(ch) != 127 else " " for ch in raw_username)[:40]
+    user_id = user.id
     uid = user_id
     data = getattr(callback_query, 'data', None)
     if data is None:
@@ -184,21 +243,29 @@ async def _handle_callback(client, callback_query: CallbackQuery):
     # --- Gestione eliminazione annuncio SEMPRE, anche senza sessione ---
     if data and data.startswith("delete_"):
         try:
-            # Formato callback: delete_{owner_id}_{ann_ids}_{preview_ids}
+            # Formato callback firmato: delete_{owner_id}_{ids_encoded}_{sig10}
             parts = data.split("_")
-            if len(parts) < 3:
-                await callback_query.answer("❌ Dati non validi.", show_alert=True)
+            if len(parts) != 4:
+                await callback_query.answer("❌ Dati non validi o bottone obsoleto.", show_alert=True)
                 return
-            
+
             owner_id = int(parts[1])
-            ann_ids = [int(i) for i in parts[2].split(",") if i and i != 'None']
-            
-            # SECURITY: Verifica che l'utente sia il proprietario dell'annuncio
+            ids_encoded = parts[2]
+            sig = parts[3]
+
+            # SECURITY (OWASP A01): Verifica che l'utente sia il proprietario dell'annuncio
             if callback_query.from_user.id != owner_id:
                 logging.warning(f"[SECURITY] Tentativo di eliminazione non autorizzato: user_id={user_id} ha tentato di eliminare l'annuncio del proprietario {owner_id}")
                 await callback_query.answer("❌ Solo l'autore dell'annuncio può eliminarlo.", show_alert=True)
                 return
-            
+
+            # SECURITY (OWASP A08): Verifica firma crittografica HMAC per impedire eliminazione arbitraria di messaggi nel gruppo
+            if not verify_delete_callback(owner_id, ids_encoded, sig):
+                logging.warning(f"[SECURITY] Firma HMAC non valida su callback delete_ da user_id={user_id}: {data}")
+                await callback_query.answer("❌ Firma di sicurezza non valida.", show_alert=True)
+                return
+
+            ann_ids = decode_msg_ids(ids_encoded)
             user = callback_query.from_user
 
             if ann_ids:
@@ -343,23 +410,32 @@ async def _handle_callback(client, callback_query: CallbackQuery):
                     break
             preview_with_ids = []
             if multi_file_list:
-                from pyrogram.types import InputMediaPhoto, InputMediaDocument
-                media = []
-                for idx, f in enumerate(multi_file_list):
+                if len(multi_file_list) == 1:
+                    f = multi_file_list[0]
                     if f["file_type"] == "photo":
-                        media.append(InputMediaPhoto(f["file_id"], caption=text if idx == 0 else None))
+                        sent = await client.send_photo(uid, f["file_id"], caption=text[:1024])
                     else:
-                        media.append(InputMediaDocument(f["file_id"], caption=text if idx == 0 else None))
-                sent_msgs = await client.send_media_group(uid, media)
-                preview_with_ids = [m.id for m in sent_msgs]
+                        sent = await client.send_document(uid, f["file_id"], caption=text[:1024])
+                    preview_with_ids = [sent.id]
+                else:
+                    from pyrogram.types import InputMediaPhoto, InputMediaDocument
+                    media = []
+                    for idx, f in enumerate(multi_file_list[:10]):
+                        cap = text[:1024] if idx == 0 else None
+                        if f["file_type"] == "photo":
+                            media.append(InputMediaPhoto(f["file_id"], caption=cap))
+                        else:
+                            media.append(InputMediaDocument(f["file_id"], caption=cap))
+                    sent_msgs = await client.send_media_group(uid, media)
+                    preview_with_ids = [m.id for m in sent_msgs]
             else:
                 file_id = info.get("file")
                 file_type = info.get("file_type")
                 if file_id:
                     if file_type == "photo":
-                        sent = await client.send_photo(uid, file_id, caption=text)
+                        sent = await client.send_photo(uid, file_id, caption=text[:1024])
                     else:
-                        sent = await client.send_document(uid, file_id, caption=text)
+                        sent = await client.send_document(uid, file_id, caption=text[:1024])
                     preview_with_ids = [sent.id]
                 else:
                     sent = await client.send_message(uid, text)
@@ -373,7 +449,7 @@ async def _handle_callback(client, callback_query: CallbackQuery):
                 f"Puoi eliminare questo annuncio in qualsiasi momento premendo il bottone qui sotto."
             )
             menu_btn = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🗑️ Elimina questo annuncio", callback_data=f"delete_{uid}_{','.join(str(i) for i in ann_media_ids)}_{','.join(str(i) for i in preview_with_ids)}")],
+                [InlineKeyboardButton("🗑️ Elimina questo annuncio", callback_data=sign_delete_callback(uid, ann_media_ids))],
                 [InlineKeyboardButton("🏠 Torna al menù", callback_data="back_to_menu")]
             ])
             confirm_msg = await client.send_message(uid, conferma, reply_markup=menu_btn)
