@@ -508,6 +508,20 @@ async def check_runtime_components() -> List[str]:
             errors.append("[OWASP CALLBACK] Tampered message IDs accepted by verify_delete_callback!")
         if buttons_mod.decode_msg_ids(parts[2]) != sample_ids:
             errors.append("[OWASP CALLBACK] decode_msg_ids did not round-trip contiguous album IDs")
+
+        # Test Onboarding & Access Control (link al gruppo + reminder @username/Nick)
+        import middleware.permissions as perm_mod
+        from types import SimpleNamespace
+        fake_user = SimpleNamespace(id=123456, username="test_nick")
+        for is_mem, has_un in [(False, False), (False, True), (True, False)]:
+            txt = perm_mod.build_access_denied_text(fake_user, is_member=is_mem, has_username=has_un)
+            if "@username" not in txt or "Nick" not in txt:
+                errors.append(f"[ONBOARDING] build_access_denied_text({is_mem}, {has_un}) missing @username/Nick reminder")
+            if not is_mem and config.GROUP_INVITE_LINK not in txt:
+                errors.append(f"[ONBOARDING] build_access_denied_text({is_mem}, {has_un}) missing GROUP_INVITE_LINK")
+        kb = perm_mod.build_access_denied_keyboard()
+        if not kb.inline_keyboard or len(kb.inline_keyboard) < 2:
+            errors.append("[ONBOARDING] build_access_denied_keyboard missing group URL or verify button")
     except Exception as e:
         errors.append(f"[MODULE / STORAGE ERROR] Failed runtime verification: {e}")
 

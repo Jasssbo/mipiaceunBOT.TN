@@ -123,6 +123,27 @@ async def _handle_callback(client, callback_query: CallbackQuery):
         await callback_query.answer("❌ Errore interno: dati mancanti.", show_alert=True)
         return
 
+    # --- Gestione verifica accesso dal bottone "Sono entrato, verifica accesso" ---
+    if data == "verify_membership":
+        logging.info(f"[VERIFY] Utente @{username} (user_id={user_id}) ha superato la verifica di accesso al gruppo")
+        await callback_query.answer("✅ Accesso verificato! Benvenuto nella Community.", show_alert=False)
+        await safe_delete(client, user.id, callback_query.message.id)
+        consent_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Dichiaro di avere 18+ anni e accetto i Termini", callback_data="accept_terms")],
+            [InlineKeyboardButton("📜 Leggi Termini", callback_data="read_terms"), InlineKeyboardButton("🔒 Privacy", callback_data="read_privacy")],
+        ])
+        welcome_text = (
+            "👋 **Benvenuto su mipiaceunBOT!**\n\n"
+            "Questo bot ti permette di pubblicare annunci per trovare lavoro, "
+            "condividere progetti o eventi nella nostra community.\n\n"
+            "⚠️ **Prima di iniziare:**\n"
+            "• Devi avere **almeno 18 anni** per utilizzare questo servizio.\n"
+            "• Utilizzando il bot accetti i nostri Termini di Servizio e l'Informativa sulla Privacy.\n\n"
+            "Per favore, conferma di avere i requisiti e di accettare le condizioni per continuare."
+        )
+        await send_clean_message(client, user.id, callback_query.message.chat.id, welcome_text, consent_keyboard)
+        return
+
     # --- Gestione accettazione termini ---
     if data == "accept_terms":
         logging.info(f"[TERMS] Utente user_id={user_id} ha accettato i termini")

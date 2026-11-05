@@ -57,41 +57,57 @@ async def _refresh_members_cache(client) -> None:
             logging.warning(f"[CACHE] Impossibile elencare l'intera lista membri ({e}); uso fallback get_chat_member.")
 
 
-async def is_user_allowed_by_username(client, user) -> bool:
+async def check_user_access(client, user, force_live: bool = False) -> tuple[bool, bool]:
     """
-    Verifica se l'utente è presente nel gruppo (tramite ID o username).
-    Usa la cache locale e, se non trovato o a freddo, effettua una verifica puntuale con get_chat_member.
+    Verifica in modo granulare:
+    1. Se l'utente è membro attivo del gruppo (`is_member`)
+    2. Se l'utente ha un @username (Nick) pubblico impostato su Telegram (`has_username`)
+
+    Returns:
+        Tuple (is_member: bool, has_username: bool)
     """
     if not user:
-        return False
+        return False, False
+
+    has_username = bool(getattr(user, "username", None))
 
     if user.id in ADMIN_IDS:
-        return True
+        return True, True
 
     try:
-        await _refresh_members_cache(client)
+        if not force_live:
+            await _refresh_members_cache(client)
 
-        if user.id in _members_cache["user_ids"]:
-            return True
+            if user.id in _members_cache["user_ids"]:
+                return True, has_username
 
-        if user.username and user.username.lower() in _members_cache["usernames"]:
-            return True
+            if has_username and user.username.lower() in _members_cache["usernames"]:
+                return True, True
 
-        # Fallback puntuale: utile per utenti appena entrati nel gruppo o se get_chat_members non è disponibile
+        # Verifica puntuale in tempo reale tramite API Telegram (fondamentale per chi è appena entrato nel gruppo)
         try:
             member = await client.get_chat_member(CHAT_ID, user.id)
             if member and member.status not in (ChatMemberStatus.LEFT, ChatMemberStatus.BANNED):
                 _members_cache["user_ids"].add(user.id)
-                if user.username:
-                    _members_cache["usernames"].add(user.username.lower())
-                return True
+                if member.user and member.user.username:
+                    _members_cache["usernames"].add(member.user.username.lower())
+                    has_username = True
+                return True, has_username
         except Exception:
             pass
 
-        return False
+        return False, has_username
     except Exception:
         logging.exception("Errore durante il controllo della presenza dell'utente nel gruppo.")
-        return False
+        return False, has_username
+
+
+async def is_user_allowed_by_username(client, user) -> bool:
+    """
+    Verifica se l'utente è presente nel gruppo ed ha i requisiti per interagire con il bot.
+    """
+    is_member, has_username = await check_user_access(client, user)
+    return is_member and has_username
 
 
 def invalidate_members_cache() -> None:

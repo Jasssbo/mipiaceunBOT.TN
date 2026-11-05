@@ -52,6 +52,7 @@ API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID", "-1002461409137"))
+GROUP_INVITE_LINK = os.getenv("GROUP_INVITE_LINK", "https://t.me/mipiaceunBOTTN")
 
 # Lista degli admin (Telegram user IDs) — possono gestire segnalazioni e moderare
 # Puoi aggiungere più admin separandoli con virgola nel .env: ADMIN_IDS=123456,789012
